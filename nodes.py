@@ -68,7 +68,9 @@ class TransparencyBackgroundRemover:
                     "display": "number",
                     "tooltip": "Threshold for binary alpha mask (0-255)"
                 }),
-                "output_format": (["RGBA", "RGB_WITH_MASK"],),
+                "output_format": (["RGBA", "RGB_WITH_MASK"], {
+                    "default": "RGBA"
+                }),
             }
         }
 
@@ -97,14 +99,17 @@ class TransparencyBackgroundRemover:
                 raise ValueError(f"Expected 4D tensor, got {len(image.shape)}D")
 
             # Process with error catching
-            results, masks = self._process_images(image, tolerance=tolerance,
-                                                edge_sensitivity=edge_sensitivity,
-                                                foreground_bias=foreground_bias,
-                                                color_clusters=color_clusters,
-                                                edge_refinement=edge_refinement,
-                                                dither_handling=dither_handling,
-                                                binary_threshold=binary_threshold,
-                                                output_format=output_format)
+            results, masks = self._process_images(
+                image=image, 
+                tolerance=tolerance,
+                edge_sensitivity=edge_sensitivity,
+                foreground_bias=foreground_bias,
+                color_clusters=color_clusters,
+                edge_refinement=edge_refinement,
+                dither_handling=dither_handling,
+                binary_threshold=binary_threshold,
+                output_format=output_format
+            )
 
             return (results, masks)
 

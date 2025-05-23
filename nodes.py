@@ -50,6 +50,14 @@ class TransparencyBackgroundRemover:
                     "display": "number",
                     "tooltip": "Number of color clusters for background detection"
                 }),
+                "binary_threshold": ("INT", {
+                    "default": 128,
+                    "min": 0,
+                    "max": 255,
+                    "step": 1,
+                    "display": "number",
+                    "tooltip": "Threshold for binary alpha mask (0-255)"
+                }),
             },
             "optional": {
                 "edge_refinement": ("BOOLEAN", {
@@ -59,14 +67,6 @@ class TransparencyBackgroundRemover:
                 "dither_handling": ("BOOLEAN", {
                     "default": True,
                     "tooltip": "Enable dithered pattern detection and handling"
-                }),
-                "binary_threshold": ("INT", {
-                    "default": 128,
-                    "min": 0,
-                    "max": 255,
-                    "step": 1,
-                    "display": "number",
-                    "tooltip": "Threshold for binary alpha mask (0-255)"
                 }),
                 "output_format": (["RGBA", "RGB_WITH_MASK"], {
                     "default": "RGBA"
@@ -83,9 +83,8 @@ class TransparencyBackgroundRemover:
         self.processor = None
 
     def remove_background(self, image, tolerance=30, edge_sensitivity=0.8,
-                         foreground_bias=0.7, color_clusters=8,
-                         edge_refinement=True, dither_handling=True,
-                         binary_threshold=128, output_format="RGBA"):
+                         foreground_bias=0.7, color_clusters=8, binary_threshold=128,
+                         edge_refinement=True, dither_handling=True, output_format="RGBA"):
         """
         Main processing function for background removal with error handling.
         """
@@ -121,9 +120,8 @@ class TransparencyBackgroundRemover:
             raise RuntimeError(f"Background removal failed: {str(e)}")
 
     def _process_images(self, image, tolerance=30, edge_sensitivity=0.8,
-                       foreground_bias=0.7, color_clusters=8,
-                       edge_refinement=True, dither_handling=True,
-                       binary_threshold=128, output_format="RGBA"):
+                       foreground_bias=0.7, color_clusters=8, binary_threshold=128,
+                       edge_refinement=True, dither_handling=True, output_format="RGBA"):
         """
         Internal method for processing images without error handling wrapper.
         """

@@ -74,6 +74,12 @@ class EnhancedPixelArtProcessor:
             dither_mask = self._dither_pattern_detection(image)
             masks.append(dither_mask)
         
+        # Debug individual masks before combining
+        for i, mask in enumerate(masks):
+            method_names = ["Edge", "Clustering", "Corner", "Dither"]
+            method_name = method_names[i] if i < len(method_names) else f"Method{i}"
+            print(f"DEBUG: {method_name} mask - min: {mask.min()}, max: {mask.max()}, background pixels: {np.sum(mask == 255)}")
+        
         # Combine masks with weighted voting
         final_mask = self._combine_masks(masks, image)
         
@@ -83,14 +89,20 @@ class EnhancedPixelArtProcessor:
         
         # Apply foreground bias
         final_mask = self._apply_foreground_bias(final_mask, image)
+        print(f"DEBUG: After foreground bias - min: {final_mask.min()}, max: {final_mask.max()}, mean: {final_mask.mean():.1f}")
         
         # Convert to binary mask to eliminate semi-transparency
         final_mask = self._make_binary_mask(final_mask, self.binary_threshold)
+        print(f"DEBUG: After binary threshold - min: {final_mask.min()}, max: {final_mask.max()}, mean: {final_mask.mean():.1f}")
+        print(f"DEBUG: Binary mask - background pixels (255): {np.sum(final_mask == 255)}, foreground pixels (0): {np.sum(final_mask == 0)}")
         
-        # Invert mask: background=0 (transparent), foreground=255 (opaque)
-        final_mask = 255 - final_mask
+        # Invert mask: background detected pixels (255) -> alpha=0 (transparent)
+        #              foreground pixels (0) -> alpha=255 (opaque)
+        alpha_mask = 255 - final_mask
+        print(f"DEBUG: Final alpha - min: {alpha_mask.min()}, max: {alpha_mask.max()}, mean: {alpha_mask.mean():.1f}")
+        print(f"DEBUG: Alpha mask - transparent pixels (0): {np.sum(alpha_mask == 0)}, opaque pixels (255): {np.sum(alpha_mask == 255)}")
         
-        rgba_result[:, :, 3] = final_mask
+        rgba_result[:, :, 3] = alpha_mask
         return rgba_result
     
     def _edge_based_detection(self, image: np.ndarray) -> np.ndarray:
@@ -208,10 +220,13 @@ class EnhancedPixelArtProcessor:
         if not masks:
             return np.zeros(image.shape[:2], dtype=np.uint8)
         
+        print(f"DEBUG: Combining {len(masks)} masks")
+        
         # Normalize masks to 0-1 range
         normalized_masks = []
-        for mask in masks:
+        for i, mask in enumerate(masks):
             norm_mask = mask.astype(float) / 255.0
+            print(f"DEBUG: Mask {i} - min: {norm_mask.min():.3f}, max: {norm_mask.max():.3f}, mean: {norm_mask.mean():.3f}")
             normalized_masks.append(norm_mask)
         
         # Weighted combination
@@ -223,8 +238,14 @@ class EnhancedPixelArtProcessor:
         for mask, weight in zip(normalized_masks, weights):
             combined += mask * weight
         
+        print(f"DEBUG: Combined mask - min: {combined.min():.3f}, max: {combined.max():.3f}, mean: {combined.mean():.3f}")
+        
+        # Apply conservative threshold (> 0.6 for background detection)
+        binary_combined = (combined > 0.6).astype(float)
+        print(f"DEBUG: After threshold - background pixels: {np.sum(binary_combined)}, total: {binary_combined.size}")
+        
         # Convert back to 0-255 range
-        return (combined * 255).astype(np.uint8)
+        return (binary_combined * 255).astype(np.uint8)
     
     def _refine_edges(self, mask: np.ndarray, image: np.ndarray) -> np.ndarray:
         """Apply morphological operations to refine mask edges."""

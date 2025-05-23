@@ -87,6 +87,9 @@ class EnhancedPixelArtProcessor:
         # Convert to binary mask to eliminate semi-transparency
         final_mask = self._make_binary_mask(final_mask, self.binary_threshold)
         
+        # Invert mask: background=0 (transparent), foreground=255 (opaque)
+        final_mask = 255 - final_mask
+        
         rgba_result[:, :, 3] = final_mask
         return rgba_result
     

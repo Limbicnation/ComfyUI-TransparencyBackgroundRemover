@@ -149,7 +149,7 @@ class TransparencyBackgroundRemover:
             # Process image
             rgba_result = processor.remove_background_advanced(img_np)
 
-            # Extract alpha channel as mask
+            # Extract alpha channel as mask (invert: 0=transparent, 255=opaque)
             alpha_channel = rgba_result[:, :, 3]
             masks.append(alpha_channel)
 
@@ -161,7 +161,13 @@ class TransparencyBackgroundRemover:
                 results.append(rgb_result)
 
         # Convert back to ComfyUI tensor format
-        result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+        if output_format == "RGBA":
+            # For RGBA, maintain 4 channels
+            result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+        else:
+            # For RGB_WITH_MASK, use 3 channels
+            result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+        
         mask_tensor = torch.from_numpy(np.array(masks)).float() / 255.0
 
         return result_tensor, mask_tensor

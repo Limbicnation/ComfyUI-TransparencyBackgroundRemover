@@ -1,35 +1,23 @@
-[build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "comfyui-transparency-background-remover"
+name = "comfyui-transparencybackgroundremover"
 version = "1.0.0"
-description = "ComfyUI node for removing backgrounds and creating transparency"
-readme = "README.md"
-license = {file = "LICENSE"}
-authors = [
-    {name = "Your Name", email = "your.email@example.com"}
-]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-]
+description = "Automatic background removal and transparency generation for ComfyUI"
+license = { file = "LICENSE" }
 requires-python = ">=3.8"
-dependencies = [
-    "torch",
-    "numpy",
-    "Pillow",
-    "opencv-python",
+classifiers = [
+    "Operating System :: OS Independent"
 ]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [project.urls]
-Homepage = "https://github.com/yourusername/ComfyUI-TransparencyBackgroundRemover"
-Repository = "https://github.com/yourusername/ComfyUI-TransparencyBackgroundRemover"
-Issues = "https://github.com/yourusername/ComfyUI-TransparencyBackgroundRemover/issues"
+Repository = "https://github.com/Limbicnation/ComfyUI-TransparencyBackgroundRemover"
+Documentation = "https://github.com/Limbicnation/ComfyUI-TransparencyBackgroundRemover/wiki"
+"Bug Tracker" = "https://github.com/Limbicnation/ComfyUI-TransparencyBackgroundRemover/issues"
+
+[tool.comfy]
+PublisherId = "Limbicnation"
+DisplayName = "Transparency Background Remover"
+Icon = "https://raw.githubusercontent.com/Limbicnation/ComfyUI-TransparencyBackgroundRemover/main/icon.png"

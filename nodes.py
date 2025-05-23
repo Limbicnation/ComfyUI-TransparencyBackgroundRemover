@@ -77,7 +77,41 @@ class TransparencyBackgroundRemover:
                          edge_refinement=True, dither_handling=True,
                          output_format="RGBA"):
         """
-        Main processing function for background removal.
+        Main processing function for background removal with error handling.
+        """
+        try:
+            # Validate input
+            if image is None or image.shape[0] == 0:
+                raise ValueError("No input image provided")
+
+            # Check image dimensions
+            if len(image.shape) != 4:
+                raise ValueError(f"Expected 4D tensor, got {len(image.shape)}D")
+
+            # Process with error catching
+            results, masks = self._process_images(image, tolerance=tolerance,
+                                                edge_sensitivity=edge_sensitivity,
+                                                foreground_bias=foreground_bias,
+                                                color_clusters=color_clusters,
+                                                edge_refinement=edge_refinement,
+                                                dither_handling=dither_handling,
+                                                output_format=output_format)
+
+            return (results, masks)
+
+        except cv2.error as e:
+            raise RuntimeError(f"OpenCV processing error: {str(e)}")
+        except MemoryError:
+            raise RuntimeError("Insufficient memory for processing. Try reducing batch size.")
+        except Exception as e:
+            raise RuntimeError(f"Background removal failed: {str(e)}")
+
+    def _process_images(self, image, tolerance=30, edge_sensitivity=0.8,
+                       foreground_bias=0.7, color_clusters=8,
+                       edge_refinement=True, dither_handling=True,
+                       output_format="RGBA"):
+        """
+        Internal method for processing images without error handling wrapper.
         """
         # Convert from ComfyUI tensor format to numpy
         batch_size, height, width, channels = image.shape
@@ -117,7 +151,7 @@ class TransparencyBackgroundRemover:
         result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
         mask_tensor = torch.from_numpy(np.array(masks)).float() / 255.0
 
-        return (result_tensor, mask_tensor)
+        return result_tensor, mask_tensor
 
 class TransparencyBackgroundRemoverBatch:
     """

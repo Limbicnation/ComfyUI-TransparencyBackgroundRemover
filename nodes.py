@@ -50,6 +50,14 @@ class TransparencyBackgroundRemover:
                     "display": "number",
                     "tooltip": "Number of color clusters for background detection"
                 }),
+                "binary_threshold": ("INT", {
+                    "default": 128,
+                    "min": 0,
+                    "max": 255,
+                    "step": 1,
+                    "display": "number",
+                    "tooltip": "Threshold for binary alpha mask (0-255)"
+                }),
             },
             "optional": {
                 "edge_refinement": ("BOOLEAN", {
@@ -60,7 +68,9 @@ class TransparencyBackgroundRemover:
                     "default": True,
                     "tooltip": "Enable dithered pattern detection and handling"
                 }),
-                "output_format": (["RGBA", "RGB_WITH_MASK"],),
+                "output_format": (["RGBA", "RGB_WITH_MASK"], {
+                    "default": "RGBA"
+                }),
             }
         }
 
@@ -73,9 +83,8 @@ class TransparencyBackgroundRemover:
         self.processor = None
 
     def remove_background(self, image, tolerance=30, edge_sensitivity=0.8,
-                         foreground_bias=0.7, color_clusters=8,
-                         edge_refinement=True, dither_handling=True,
-                         output_format="RGBA"):
+                         foreground_bias=0.7, color_clusters=8, binary_threshold=128,
+                         edge_refinement=True, dither_handling=True, output_format="RGBA"):
         """
         Main processing function for background removal with error handling.
         """
@@ -89,13 +98,17 @@ class TransparencyBackgroundRemover:
                 raise ValueError(f"Expected 4D tensor, got {len(image.shape)}D")
 
             # Process with error catching
-            results, masks = self._process_images(image, tolerance=tolerance,
-                                                edge_sensitivity=edge_sensitivity,
-                                                foreground_bias=foreground_bias,
-                                                color_clusters=color_clusters,
-                                                edge_refinement=edge_refinement,
-                                                dither_handling=dither_handling,
-                                                output_format=output_format)
+            results, masks = self._process_images(
+                image=image, 
+                tolerance=tolerance,
+                edge_sensitivity=edge_sensitivity,
+                foreground_bias=foreground_bias,
+                color_clusters=color_clusters,
+                edge_refinement=edge_refinement,
+                dither_handling=dither_handling,
+                binary_threshold=binary_threshold,
+                output_format=output_format
+            )
 
             return (results, masks)
 
@@ -107,9 +120,8 @@ class TransparencyBackgroundRemover:
             raise RuntimeError(f"Background removal failed: {str(e)}")
 
     def _process_images(self, image, tolerance=30, edge_sensitivity=0.8,
-                       foreground_bias=0.7, color_clusters=8,
-                       edge_refinement=True, dither_handling=True,
-                       output_format="RGBA"):
+                       foreground_bias=0.7, color_clusters=8, binary_threshold=128,
+                       edge_refinement=True, dither_handling=True, output_format="RGBA"):
         """
         Internal method for processing images without error handling wrapper.
         """
@@ -130,13 +142,14 @@ class TransparencyBackgroundRemover:
                 color_clusters=color_clusters,
                 foreground_bias=foreground_bias,
                 edge_refinement=edge_refinement,
-                dither_handling=dither_handling
+                dither_handling=dither_handling,
+                binary_threshold=binary_threshold
             )
 
             # Process image
             rgba_result = processor.remove_background_advanced(img_np)
 
-            # Extract alpha channel as mask
+            # Extract alpha channel as mask (invert: 0=transparent, 255=opaque)
             alpha_channel = rgba_result[:, :, 3]
             masks.append(alpha_channel)
 
@@ -148,7 +161,13 @@ class TransparencyBackgroundRemover:
                 results.append(rgb_result)
 
         # Convert back to ComfyUI tensor format
-        result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+        if output_format == "RGBA":
+            # For RGBA, maintain 4 channels
+            result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+        else:
+            # For RGB_WITH_MASK, use 3 channels
+            result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+        
         mask_tensor = torch.from_numpy(np.array(masks)).float() / 255.0
 
         return result_tensor, mask_tensor

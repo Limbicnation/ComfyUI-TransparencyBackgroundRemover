@@ -13,7 +13,8 @@ class EnhancedPixelArtProcessor:
     
     def __init__(self, tolerance: int = 30, edge_sensitivity: float = 0.8,
                  color_clusters: int = 8, foreground_bias: float = 0.7,
-                 edge_refinement: bool = True, dither_handling: bool = True):
+                 edge_refinement: bool = True, dither_handling: bool = True,
+                 binary_threshold: int = 128):
         """
         Initialize the processor with configuration parameters.
         
@@ -24,6 +25,7 @@ class EnhancedPixelArtProcessor:
             foreground_bias: Bias towards foreground preservation (0.0-1.0)
             edge_refinement: Enable edge refinement post-processing
             dither_handling: Enable dithered pattern detection
+            binary_threshold: Threshold for binary alpha mask (0-255)
         """
         self.tolerance = tolerance
         self.edge_sensitivity = edge_sensitivity
@@ -31,6 +33,7 @@ class EnhancedPixelArtProcessor:
         self.foreground_bias = foreground_bias
         self.edge_refinement = edge_refinement
         self.dither_handling = dither_handling
+        self.binary_threshold = binary_threshold
         
     def remove_background_advanced(self, image: np.ndarray) -> np.ndarray:
         """
@@ -81,7 +84,14 @@ class EnhancedPixelArtProcessor:
         # Apply foreground bias
         final_mask = self._apply_foreground_bias(final_mask, image)
         
-        rgba_result[:, :, 3] = final_mask
+        # Convert to binary mask to eliminate semi-transparency
+        final_mask = self._make_binary_mask(final_mask, self.binary_threshold)
+        
+        # Invert mask: background detected pixels (255) -> alpha=0 (transparent)
+        #              foreground pixels (0) -> alpha=255 (opaque)
+        alpha_mask = 255 - final_mask
+        
+        rgba_result[:, :, 3] = alpha_mask
         return rgba_result
     
     def _edge_based_detection(self, image: np.ndarray) -> np.ndarray:
@@ -118,7 +128,6 @@ class EnhancedPixelArtProcessor:
         # Apply K-means clustering
         kmeans = KMeans(n_clusters=self.color_clusters, random_state=42, n_init=10)
         labels = kmeans.fit_predict(pixels)
-        centers = kmeans.cluster_centers_
         
         # Find background clusters (assume corners are background)
         h, w = image.shape[:2]
@@ -214,10 +223,13 @@ class EnhancedPixelArtProcessor:
         for mask, weight in zip(normalized_masks, weights):
             combined += mask * weight
         
+        # Apply conservative threshold (> 0.6 for background detection)
+        binary_combined = (combined > 0.6).astype(float)
+        
         # Convert back to 0-255 range
-        return (combined * 255).astype(np.uint8)
+        return (binary_combined * 255).astype(np.uint8)
     
-    def _refine_edges(self, mask: np.ndarray, image: np.ndarray) -> np.ndarray:
+    def _refine_edges(self, mask: np.ndarray, image: np.ndarray = None) -> np.ndarray:
         """Apply morphological operations to refine mask edges."""
         # Remove small noise
         kernel_small = np.ones((3, 3), np.uint8)
@@ -226,9 +238,9 @@ class EnhancedPixelArtProcessor:
         # Fill small holes
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_small, iterations=2)
         
-        # Smooth edges
+        # Smooth edges with closing operation
         kernel_smooth = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_SMOOTH, kernel_smooth)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_smooth, iterations=1)
         
         # Apply Gaussian blur for softer edges
         mask = cv2.GaussianBlur(mask, (3, 3), 0)
@@ -265,6 +277,31 @@ class EnhancedPixelArtProcessor:
         mask_float = mask_float * (1.0 - complexity * bias_strength)
         
         return (mask_float * 255).astype(np.uint8)
+    
+    def _make_binary_mask(self, mask: np.ndarray, threshold: int = 128) -> np.ndarray:
+        """
+        Convert grayscale mask to binary mask to eliminate semi-transparency.
+        
+        Args:
+            mask: Input grayscale mask (0-255)
+            threshold: Threshold value for binarization (default: 128)
+            
+        Returns:
+            Binary mask with only 0 (transparent) or 255 (opaque) values
+        """
+        # Apply binary threshold
+        _, binary_mask = cv2.threshold(mask, threshold, 255, cv2.THRESH_BINARY)
+        
+        # Optional: Apply morphological operations to clean up the binary mask
+        kernel = np.ones((3, 3), np.uint8)
+        
+        # Remove small noise (opening)
+        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        
+        # Fill small holes (closing)
+        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        
+        return binary_mask
     
     def auto_adjust_parameters(self, image: np.ndarray) -> dict:
         """

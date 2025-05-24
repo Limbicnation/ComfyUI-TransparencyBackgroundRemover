@@ -18,6 +18,6 @@ Documentation = "https://github.com/Limbicnation/ComfyUI-TransparencyBackgroundR
 "Bug Tracker" = "https://github.com/Limbicnation/ComfyUI-TransparencyBackgroundRemover/issues"
 
 [tool.comfy]
-PublisherId = "Limbicnation"
+PublisherId = "limbicnation"
 DisplayName = "Transparency Background Remover"
 Icon = "https://raw.githubusercontent.com/Limbicnation/ComfyUI-TransparencyBackgroundRemover/main/icon.png"

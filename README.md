@@ -16,7 +16,7 @@
 
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover.jpg)
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover1.jpg)
-![ComfyUI-TransparencyBackgroundRemover](ComfyUI-TransparencyBackgroundRemover-batch.jpg)
+![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover-batch.jpg)
 
 ---
 

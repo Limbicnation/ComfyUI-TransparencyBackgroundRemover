@@ -15,6 +15,7 @@
 - ⚙️ **Highly Customizable** - Fine-tune parameters for different image types and requirements
 
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover.jpg)
+![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover1.jpg)
 
 ---
 

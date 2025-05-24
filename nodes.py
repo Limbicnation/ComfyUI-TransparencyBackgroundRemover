@@ -58,6 +58,14 @@ class TransparencyBackgroundRemover:
                     "display": "number",
                     "tooltip": "Threshold for binary alpha mask (0-255)"
                 }),
+                "output_size": (["ORIGINAL", "64x64", "96x96", "128x128", "256x256", "512x512", "768x768", "1024x1024", "1280x1280", "1536x1536", "1792x1792", "2048x2048"], {
+                    "default": "ORIGINAL",
+                    "tooltip": "Target output size (power-of-8 dimensions for optimal scaling)"
+                }),
+                "scaling_method": (["NEAREST"], {
+                    "default": "NEAREST",
+                    "tooltip": "Nearest neighbor interpolation for pixel-perfect scaling"
+                }),
             },
             "optional": {
                 "edge_refinement": ("BOOLEAN", {
@@ -81,10 +89,91 @@ class TransparencyBackgroundRemover:
 
     def __init__(self):
         self.processor = None
+    
+    def parse_output_size(self, size_string):
+        """
+        Parse output size string to width, height tuple.
+        
+        Args:
+            size_string: String like "512x512" or "ORIGINAL"
+            
+        Returns:
+            Tuple (width, height) or None for ORIGINAL
+        """
+        if size_string == "ORIGINAL":
+            return None
+        
+        try:
+            width, height = size_string.split('x')
+            return (int(width), int(height))
+        except ValueError:
+            raise ValueError(f"Invalid output size format: {size_string}")
+    
+    def calculate_scaling_factor(self, current_size, target_size):
+        """
+        Calculate optimal integer scaling factor for NEAREST interpolation.
+        
+        Args:
+            current_size: Tuple (width, height) of current image
+            target_size: Tuple (width, height) of target size
+            
+        Returns:
+            Scaling factor that achieves target size
+        """
+        current_w, current_h = current_size
+        target_w, target_h = target_size
+        
+        # Calculate scale factors for width and height
+        scale_w = target_w / current_w
+        scale_h = target_h / current_h
+        
+        # Use the same scale for both dimensions to maintain aspect ratio
+        # Choose the smaller scale to ensure we don't exceed target dimensions
+        scale_factor = min(scale_w, scale_h)
+        
+        return scale_factor
+    
+    def intelligent_scale(self, image_pil, target_size):
+        """
+        Scale image to target dimensions using intelligent NEAREST scaling.
+        
+        Args:
+            image_pil: PIL Image object
+            target_size: Tuple (width, height) for target dimensions
+            
+        Returns:
+            Scaled PIL Image
+        """
+        if target_size is None:
+            return image_pil
+            
+        current_size = (image_pil.width, image_pil.height)
+        target_w, target_h = target_size
+        
+        # If already at target size, return as-is
+        if current_size == target_size:
+            return image_pil
+        
+        # Calculate scaling factor
+        scale_factor = self.calculate_scaling_factor(current_size, target_size)
+        
+        # Apply scaling
+        new_width = int(image_pil.width * scale_factor)
+        new_height = int(image_pil.height * scale_factor)
+        
+        # If calculated size matches target exactly, use target dimensions
+        if abs(new_width - target_w) <= 1 and abs(new_height - target_h) <= 1:
+            new_width, new_height = target_w, target_h
+        
+        return image_pil.resize(
+            (new_width, new_height),
+            Image.Resampling.NEAREST
+        )
 
     def remove_background(self, image, tolerance=30, edge_sensitivity=0.8,
                          foreground_bias=0.7, color_clusters=8, binary_threshold=128,
-                         edge_refinement=True, dither_handling=True, output_format="RGBA"):
+                         edge_refinement=True, dither_handling=True, output_format="RGBA",
+                         output_size="ORIGINAL", scaling_method="NEAREST"):
         """
         Main processing function for background removal with error handling.
         """
@@ -96,6 +185,11 @@ class TransparencyBackgroundRemover:
             # Check image dimensions
             if len(image.shape) != 4:
                 raise ValueError(f"Expected 4D tensor, got {len(image.shape)}D")
+            
+            # Validate minimum input size (64x64 pixels)
+            _, height, width, _ = image.shape
+            if height < 64 or width < 64:
+                raise ValueError(f"Input image must be at least 64x64 pixels, got {width}x{height}")
 
             # Process with error catching
             results, masks = self._process_images(
@@ -107,7 +201,9 @@ class TransparencyBackgroundRemover:
                 edge_refinement=edge_refinement,
                 dither_handling=dither_handling,
                 binary_threshold=binary_threshold,
-                output_format=output_format
+                output_format=output_format,
+                output_size=output_size,
+                scaling_method=scaling_method
             )
 
             return (results, masks)
@@ -121,7 +217,8 @@ class TransparencyBackgroundRemover:
 
     def _process_images(self, image, tolerance=30, edge_sensitivity=0.8,
                        foreground_bias=0.7, color_clusters=8, binary_threshold=128,
-                       edge_refinement=True, dither_handling=True, output_format="RGBA"):
+                       edge_refinement=True, dither_handling=True, output_format="RGBA",
+                       output_size="ORIGINAL", scaling_method="NEAREST"):
         """
         Internal method for processing images without error handling wrapper.
         """
@@ -148,6 +245,21 @@ class TransparencyBackgroundRemover:
 
             # Process image
             rgba_result = processor.remove_background_advanced(img_np)
+            
+            # Apply scaling if requested and scaling method is NEAREST
+            if output_size != "ORIGINAL" and scaling_method == "NEAREST":
+                # Parse target dimensions
+                target_dimensions = self.parse_output_size(output_size)
+                
+                if target_dimensions is not None:
+                    # Convert to PIL Image for scaling
+                    rgba_pil = Image.fromarray(rgba_result, 'RGBA')
+                    
+                    # Apply intelligent nearest neighbor scaling
+                    rgba_scaled = self.intelligent_scale(rgba_pil, target_dimensions)
+                    
+                    # Convert back to numpy
+                    rgba_result = np.array(rgba_scaled)
 
             # Extract alpha channel as mask (invert: 0=transparent, 255=opaque)
             alpha_channel = rgba_result[:, :, 3]

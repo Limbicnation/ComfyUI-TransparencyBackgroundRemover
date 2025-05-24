@@ -1,5 +1,5 @@
 [project]
-name = "comfyui-transparencybackgroundremover"
+name = "ComfyUI-TransparencyBackgroundRemover"
 version = "1.0.0"
 description = "Automatic background removal and transparency generation for ComfyUI"
 license = { file = "LICENSE" }

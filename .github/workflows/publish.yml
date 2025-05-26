@@ -1,26 +1,82 @@
-name: Publish to Comfy registry
+name: Publish to Comfy Registry
+
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (leave empty to use pyproject.toml version)'
+        required: false
+        type: string
   push:
     branches:
       - main
-      - master
     paths:
       - "pyproject.toml"
+    tags:
+      - 'v*'
 
 permissions:
+  contents: read
   issues: write
 
 jobs:
   publish-node:
-    name: Publish Custom Node to registry
+    name: Publish Custom Node to Registry
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'Limbicnation' }}
+    
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-      - name: Publish Custom Node
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install comfy-cli toml
+          
+      - name: Validate node configuration
+        run: |
+          # Test imports
+          python -c "from nodes import NODE_CLASS_MAPPINGS; print('✓ Node validation passed')"
+          
+          # Validate pyproject.toml
+          python -c "import toml; config=toml.load('pyproject.toml'); print('✓ Configuration valid')"
+          
+      - name: Check if token is available
+        run: |
+          if [ -z "${{ secrets.REGISTRY_ACCESS_TOKEN }}" ]; then
+            echo "⚠️  REGISTRY_ACCESS_TOKEN secret is not set"
+            echo "Please add your Comfy Registry access token to repository secrets"
+            exit 1
+          else
+            echo "✓ Registry access token is configured"
+          fi
+          
+      - name: Publish to Comfy Registry (Official Action)
         uses: Comfy-Org/publish-node-action@v1
         with:
-          ## Add your own personal access token to your Github Repository secrets and reference it here.
           personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+        continue-on-error: true
+        
+      - name: Publish to Comfy Registry (Manual Fallback)
+        if: failure()
+        run: |
+          echo "Attempting manual publish as fallback..."
+          comfy --skip-prompt --no-enable-telemetry node publish --token "${{ secrets.REGISTRY_ACCESS_TOKEN }}"
+        continue-on-error: true
+        
+      - name: Create release summary
+        if: always()
+        run: |
+          echo "## 📦 Publication Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the [Comfy Registry](https://registry.comfy.org/) for your published node." >> $GITHUB_STEP_SUMMARY

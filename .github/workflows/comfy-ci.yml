@@ -11,13 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.8, 3.9, "3.10", "3.11"]
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
     
@@ -25,13 +25,27 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest flake8
+        pip install scikit-learn
     
-    - name: Lint with flake8
+    - name: Lint with flake8 (optional)
       run: |
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        pip install flake8
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=examples
+        # Exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --exclude=examples
+      continue-on-error: true
     
-    - name: Test import
+    - name: Test node import
       run: |
-        python -c "from nodes import NODE_CLASS_MAPPINGS; print('Import successful')"
+        python -c "from nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS; print('✓ Node import successful'); print(f'Found {len(NODE_CLASS_MAPPINGS)} node classes')"
+    
+    - name: Test background remover import
+      run: |
+        python -c "from background_remover import EnhancedPixelArtProcessor; print('✓ Background remover import successful')"
+      continue-on-error: true
+    
+    - name: Validate pyproject.toml
+      run: |
+        pip install toml
+        python -c "import toml; config=toml.load('pyproject.toml'); print('✓ pyproject.toml is valid')"

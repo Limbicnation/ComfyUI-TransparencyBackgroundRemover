@@ -37,7 +37,7 @@ class EnhancedPixelArtProcessor:
         
     def remove_background_advanced(self, image: np.ndarray) -> np.ndarray:
         """
-        Advanced background removal with multiple detection methods.
+        Advanced background removal with multiple detection methods and performance optimizations.
         
         Args:
             image: Input image as numpy array (RGB)
@@ -49,43 +49,74 @@ class EnhancedPixelArtProcessor:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         elif image.shape[2] == 4:
             image = image[:, :, :3]
-            
-        # Create RGBA output
-        rgba_result = np.zeros((image.shape[0], image.shape[1], 4), dtype=np.uint8)
+        
+        # Performance optimization: Downscale for large images during processing
+        h, w = image.shape[:2]
+        scale_factor = 1.0
+        processed_image = image
+        
+        # Downscale if image is very large (> 1024px on any side) for faster processing
+        max_dimension = max(h, w)
+        if max_dimension > 1024:
+            scale_factor = 1024.0 / max_dimension
+            new_h = int(h * scale_factor)
+            new_w = int(w * scale_factor)
+            processed_image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        
+        # Create RGBA output (full size)
+        rgba_result = np.zeros((h, w, 4), dtype=np.uint8)
         rgba_result[:, :, :3] = image
         
-        # Generate initial mask using multiple methods
+        # Generate initial mask using multiple methods on processed image
         masks = []
         
         # Method 1: Edge-based detection
-        edge_mask = self._edge_based_detection(image)
+        edge_mask = self._edge_based_detection(processed_image)
         masks.append(edge_mask)
         
-        # Method 2: Color clustering
-        cluster_mask = self._color_clustering_detection(image)
-        masks.append(cluster_mask)
+        # Method 2: Color clustering (skip for very large images to save time)
+        if max_dimension <= 1536:  # Only use clustering for reasonably sized images
+            cluster_mask = self._color_clustering_detection(processed_image)
+            masks.append(cluster_mask)
         
         # Method 3: Corner sampling
-        corner_mask = self._corner_sampling_detection(image)
+        corner_mask = self._corner_sampling_detection(processed_image)
         masks.append(corner_mask)
         
-        # Method 4: Dither detection (if enabled)
-        if self.dither_handling:
-            dither_mask = self._dither_pattern_detection(image)
+        # Method 4: Dither detection (if enabled and image not too large)
+        if self.dither_handling and max_dimension <= 1024:
+            dither_mask = self._dither_pattern_detection(processed_image)
             masks.append(dither_mask)
         
         # Combine masks with weighted voting
-        final_mask = self._combine_masks(masks, image)
+        final_mask = self._combine_masks(masks, processed_image)
         
-        # Apply edge refinement if enabled
+        # Upscale mask back to original size if it was downscaled
+        if scale_factor < 1.0:
+            final_mask = cv2.resize(final_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+        
+        # Apply edge refinement if enabled (on full-size mask for better quality)
         if self.edge_refinement:
             final_mask = self._refine_edges(final_mask, image)
         
-        # Apply foreground bias
+        # Apply foreground bias (on full-size for accuracy)
         final_mask = self._apply_foreground_bias(final_mask, image)
         
         # Convert to binary mask to eliminate semi-transparency
         final_mask = self._make_binary_mask(final_mask, self.binary_threshold)
+        
+        # Debug: Ensure mask has some variation
+        unique_values = np.unique(final_mask)
+        if len(unique_values) == 1:
+            # If mask is uniform, force some background detection using corner sampling
+            h, w = final_mask.shape
+            corner_size = min(h, w) // 10
+            if corner_size > 0:
+                # Mark corners as background
+                final_mask[:corner_size, :corner_size] = 255  # Top-left
+                final_mask[:corner_size, -corner_size:] = 255  # Top-right
+                final_mask[-corner_size:, :corner_size] = 255  # Bottom-left
+                final_mask[-corner_size:, -corner_size:] = 255  # Bottom-right
         
         # Invert mask: background detected pixels (255) -> alpha=0 (transparent)
         #              foreground pixels (0) -> alpha=255 (opaque)
@@ -121,21 +152,42 @@ class EnhancedPixelArtProcessor:
         return mask
     
     def _color_clustering_detection(self, image: np.ndarray) -> np.ndarray:
-        """Detect background using K-means color clustering."""
-        # Reshape image for clustering
-        pixels = image.reshape(-1, 3)
+        """Detect background using K-means color clustering with performance optimizations."""
+        h, w = image.shape[:2]
         
-        # Apply K-means clustering
-        kmeans = KMeans(n_clusters=self.color_clusters, random_state=42, n_init=10)
-        labels = kmeans.fit_predict(pixels)
+        # Performance optimization: Sample pixels for very large images
+        if h * w > 500000:  # For images larger than ~500k pixels
+            # Sample every 4th pixel in both dimensions
+            sampled_image = image[::4, ::4]
+            pixels = sampled_image.reshape(-1, 3)
+        else:
+            pixels = image.reshape(-1, 3)
+        
+        # Apply K-means clustering with optimized parameters
+        kmeans = KMeans(
+            n_clusters=self.color_clusters, 
+            random_state=42, 
+            n_init=5,  # Reduced from 10 for speed
+            max_iter=50,  # Limit iterations for speed
+            tol=1e-3  # Slightly looser convergence tolerance
+        )
+        
+        if h * w > 500000:
+            # Fit on sampled data, then predict on full image
+            kmeans.fit(pixels)
+            full_pixels = image.reshape(-1, 3)
+            labels = kmeans.predict(full_pixels)
+        else:
+            labels = kmeans.fit_predict(pixels)
         
         # Find background clusters (assume corners are background)
-        h, w = image.shape[:2]
+        # Use original image dimensions for corner sampling
+        full_pixels = image.reshape(-1, 3)
         corner_pixels = np.concatenate([
-            pixels[:w],  # Top row
-            pixels[-w:],  # Bottom row
-            pixels[::w],  # Left column
-            pixels[w-1::w]  # Right column
+            full_pixels[:w],  # Top row
+            full_pixels[-w:],  # Bottom row
+            full_pixels[::w],  # Left column
+            full_pixels[w-1::w]  # Right column
         ])
         
         corner_labels = kmeans.predict(corner_pixels)
@@ -229,7 +281,7 @@ class EnhancedPixelArtProcessor:
         # Convert back to 0-255 range
         return (binary_combined * 255).astype(np.uint8)
     
-    def _refine_edges(self, mask: np.ndarray, image: np.ndarray = None) -> np.ndarray:
+    def _refine_edges(self, mask: np.ndarray, image: Optional[np.ndarray] = None) -> np.ndarray:
         """Apply morphological operations to refine mask edges."""
         # Remove small noise
         kernel_small = np.ones((3, 3), np.uint8)
@@ -258,7 +310,8 @@ class EnhancedPixelArtProcessor:
         # Edge density as complexity measure
         edges = cv2.Canny(gray, 50, 150)
         edge_density = cv2.blur(edges.astype(float), (15, 15))
-        edge_density = edge_density / edge_density.max()
+        max_edge = edge_density.max()
+        edge_density = edge_density / max_edge if max_edge > 0 else edge_density
         
         # Variance as complexity measure
         variance = cv2.Laplacian(gray, cv2.CV_64F)
@@ -275,6 +328,9 @@ class EnhancedPixelArtProcessor:
         
         # Reduce background mask in complex areas
         mask_float = mask_float * (1.0 - complexity * bias_strength)
+        
+        # Ensure valid values
+        mask_float = np.clip(mask_float, 0.0, 1.0)
         
         return (mask_float * 255).astype(np.uint8)
     

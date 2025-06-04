@@ -5,8 +5,30 @@ from PIL import Image
 import cv2
 from sklearn.cluster import KMeans
 import colorsys
-import folder_paths
-import comfy.utils
+
+# Handle ComfyUI imports gracefully for testing
+try:
+    import folder_paths
+    import comfy.utils
+    COMFYUI_AVAILABLE = True
+except ImportError:
+    # Mock modules for testing/CI
+    import sys
+    from types import ModuleType
+    
+    # Create mock folder_paths
+    folder_paths = ModuleType('folder_paths')
+    folder_paths.get_input_directory = lambda: '/tmp'
+    sys.modules['folder_paths'] = folder_paths
+    
+    # Create mock comfy.utils
+    comfy = ModuleType('comfy')
+    comfy.utils = ModuleType('comfy.utils')
+    comfy.utils.common_upscale = lambda image, width, height, upscale_method, crop: image
+    sys.modules['comfy'] = comfy
+    sys.modules['comfy.utils'] = comfy.utils
+    
+    COMFYUI_AVAILABLE = False
 
 class TransparencyBackgroundRemover:
     """
@@ -395,6 +417,12 @@ class TransparencyBackgroundRemoverBatch:
                                progress_reporting=True):
         """
         Batch process multiple images with optional auto-adjustment.
+        
+        Returns:
+            tuple: A tuple containing:
+                - result_tensor (torch.Tensor): RGBA images with transparent backgrounds (batch, height, width, 4)
+                - mask_tensor (torch.Tensor): Binary alpha masks (batch, height, width, 1) 
+                - summary_report (str): Detailed processing report with stats and any errors
         """
         try:
             if images is None or images.shape[0] == 0:

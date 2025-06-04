@@ -5,8 +5,30 @@ from PIL import Image
 import cv2
 from sklearn.cluster import KMeans
 import colorsys
-import folder_paths
-import comfy.utils
+
+# Handle ComfyUI imports gracefully for testing
+try:
+    import folder_paths
+    import comfy.utils
+    COMFYUI_AVAILABLE = True
+except ImportError:
+    # Mock modules for testing/CI
+    import sys
+    from types import ModuleType
+    
+    # Create mock folder_paths
+    folder_paths = ModuleType('folder_paths')
+    folder_paths.get_input_directory = lambda: '/tmp'
+    sys.modules['folder_paths'] = folder_paths
+    
+    # Create mock comfy.utils
+    comfy = ModuleType('comfy')
+    comfy.utils = ModuleType('comfy.utils')
+    comfy.utils.common_upscale = lambda image, width, height, upscale_method, crop: image
+    sys.modules['comfy'] = comfy
+    sys.modules['comfy.utils'] = comfy.utils
+    
+    COMFYUI_AVAILABLE = False
 
 class TransparencyBackgroundRemover:
     """
@@ -62,9 +84,9 @@ class TransparencyBackgroundRemover:
                     "default": "ORIGINAL",
                     "tooltip": "Target output size (power-of-8 dimensions for optimal scaling)"
                 }),
-                "scaling_method": (["NEAREST"], {
+                "scaling_method": (["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"], {
                     "default": "NEAREST",
-                    "tooltip": "Nearest neighbor interpolation for pixel-perfect scaling"
+                    "tooltip": "Interpolation method: NEAREST (pixel-perfect), BILINEAR (smooth), BICUBIC (high-quality), LANCZOS (best quality)"
                 }),
             },
             "optional": {
@@ -77,7 +99,12 @@ class TransparencyBackgroundRemover:
                     "tooltip": "Enable dithered pattern detection and handling"
                 }),
                 "output_format": (["RGBA", "RGB_WITH_MASK"], {
-                    "default": "RGBA"
+                    "default": "RGBA",
+                    "tooltip": "Output format: RGBA with alpha channel or RGB with separate mask"
+                }),
+                "auto_adjust": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Automatically adjust parameters based on image content analysis"
                 }),
             }
         }
@@ -133,13 +160,14 @@ class TransparencyBackgroundRemover:
         
         return scale_factor
     
-    def intelligent_scale(self, image_pil, target_size):
+    def intelligent_scale(self, image_pil, target_size, scaling_method="NEAREST"):
         """
-        Scale image to target dimensions using intelligent NEAREST scaling.
+        Scale image to target dimensions using specified interpolation method.
         
         Args:
             image_pil: PIL Image object
             target_size: Tuple (width, height) for target dimensions
+            scaling_method: Interpolation method ("NEAREST", "BILINEAR", "BICUBIC", "LANCZOS")
             
         Returns:
             Scaled PIL Image
@@ -165,15 +193,25 @@ class TransparencyBackgroundRemover:
         if abs(new_width - target_w) <= 1 and abs(new_height - target_h) <= 1:
             new_width, new_height = target_w, target_h
         
+        # Select resampling method based on scaling_method
+        resampling_map = {
+            "NEAREST": Image.Resampling.NEAREST,
+            "BILINEAR": Image.Resampling.BILINEAR, 
+            "BICUBIC": Image.Resampling.BICUBIC,
+            "LANCZOS": Image.Resampling.LANCZOS
+        }
+        
+        resampling_method = resampling_map.get(scaling_method, Image.Resampling.NEAREST)
+        
         return image_pil.resize(
             (new_width, new_height),
-            Image.Resampling.NEAREST
+            resampling_method
         )
 
     def remove_background(self, image, tolerance=30, edge_sensitivity=0.8,
                          foreground_bias=0.7, color_clusters=8, binary_threshold=128,
                          edge_refinement=True, dither_handling=True, output_format="RGBA",
-                         output_size="ORIGINAL", scaling_method="NEAREST"):
+                         output_size="ORIGINAL", scaling_method="NEAREST", auto_adjust=False):
         """
         Main processing function for background removal with error handling.
         """
@@ -203,7 +241,8 @@ class TransparencyBackgroundRemover:
                 binary_threshold=binary_threshold,
                 output_format=output_format,
                 output_size=output_size,
-                scaling_method=scaling_method
+                scaling_method=scaling_method,
+                auto_adjust=auto_adjust
             )
 
             return (results, masks)
@@ -218,7 +257,7 @@ class TransparencyBackgroundRemover:
     def _process_images(self, image, tolerance=30, edge_sensitivity=0.8,
                        foreground_bias=0.7, color_clusters=8, binary_threshold=128,
                        edge_refinement=True, dither_handling=True, output_format="RGBA",
-                       output_size="ORIGINAL", scaling_method="NEAREST"):
+                       output_size="ORIGINAL", scaling_method="NEAREST", auto_adjust=False):
         """
         Internal method for processing images without error handling wrapper.
         """
@@ -243,11 +282,23 @@ class TransparencyBackgroundRemover:
                 binary_threshold=binary_threshold
             )
 
+            # Auto-adjust parameters if enabled
+            if auto_adjust:
+                adjustments = processor.auto_adjust_parameters(img_np)
+                if adjustments:
+                    # Apply adjustments
+                    if 'tolerance' in adjustments:
+                        processor.tolerance = adjustments['tolerance']
+                    if 'edge_sensitivity' in adjustments:
+                        processor.edge_sensitivity = adjustments['edge_sensitivity']
+                    if 'foreground_bias' in adjustments:
+                        processor.foreground_bias = adjustments['foreground_bias']
+
             # Process image
             rgba_result = processor.remove_background_advanced(img_np)
             
-            # Apply scaling if requested and scaling method is NEAREST
-            if output_size != "ORIGINAL" and scaling_method == "NEAREST":
+            # Apply scaling if requested
+            if output_size != "ORIGINAL":
                 # Parse target dimensions
                 target_dimensions = self.parse_output_size(output_size)
                 
@@ -255,8 +306,8 @@ class TransparencyBackgroundRemover:
                     # Convert to PIL Image for scaling
                     rgba_pil = Image.fromarray(rgba_result, 'RGBA')
                     
-                    # Apply intelligent nearest neighbor scaling
-                    rgba_scaled = self.intelligent_scale(rgba_pil, target_dimensions)
+                    # Apply intelligent scaling with specified method
+                    rgba_scaled = self.intelligent_scale(rgba_pil, target_dimensions, scaling_method)
                     
                     # Convert back to numpy
                     rgba_result = np.array(rgba_scaled)
@@ -286,7 +337,7 @@ class TransparencyBackgroundRemover:
 
 class TransparencyBackgroundRemoverBatch:
     """
-    Batch processing version with additional options.
+    Batch processing version with additional options and auto-adjustment.
     """
 
     @classmethod
@@ -294,11 +345,63 @@ class TransparencyBackgroundRemoverBatch:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "tolerance": ("INT", {"default": 30, "min": 0, "max": 255}),
-                "edge_sensitivity": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0}),
+                "tolerance": ("INT", {
+                    "default": 30,
+                    "min": 0,
+                    "max": 255,
+                    "step": 1,
+                    "display": "number",
+                    "tooltip": "Base color similarity threshold for background detection (0-255)"
+                }),
+                "edge_sensitivity": ("FLOAT", {
+                    "default": 0.8,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "display": "slider",
+                    "tooltip": "Base edge detection sensitivity (0-1)"
+                }),
                 "auto_adjust": ("BOOLEAN", {
                     "default": True,
                     "tooltip": "Automatically adjust parameters based on image content"
+                }),
+                "foreground_bias": ("FLOAT", {
+                    "default": 0.7,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "display": "slider",
+                    "tooltip": "Bias towards foreground preservation (0-1)"
+                }),
+                "color_clusters": ("INT", {
+                    "default": 8,
+                    "min": 2,
+                    "max": 20,
+                    "step": 1,
+                    "display": "number",
+                    "tooltip": "Number of color clusters for background detection"
+                }),
+            },
+            "optional": {
+                "edge_refinement": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Apply edge refinement post-processing"
+                }),
+                "dither_handling": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Enable dithered pattern detection and handling"
+                }),
+                "binary_threshold": ("INT", {
+                    "default": 128,
+                    "min": 0,
+                    "max": 255,
+                    "step": 1,
+                    "display": "number",
+                    "tooltip": "Threshold for binary alpha mask (0-255)"
+                }),
+                "progress_reporting": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Generate detailed processing report"
                 }),
             }
         }
@@ -307,6 +410,167 @@ class TransparencyBackgroundRemoverBatch:
     RETURN_NAMES = ("images", "masks", "report")
     FUNCTION = "batch_remove_background"
     CATEGORY = "image/processing"
+
+    def batch_remove_background(self, images, tolerance=30, edge_sensitivity=0.8, 
+                               auto_adjust=True, foreground_bias=0.7, color_clusters=8,
+                               edge_refinement=True, dither_handling=True, binary_threshold=128,
+                               progress_reporting=True):
+        """
+        Batch process multiple images with optional auto-adjustment.
+        
+        Returns:
+            tuple: A tuple containing:
+                - result_tensor (torch.Tensor): RGBA images with transparent backgrounds (batch, height, width, 4)
+                - mask_tensor (torch.Tensor): Binary alpha masks (batch, height, width, 1) 
+                - summary_report (str): Detailed processing report with stats and any errors
+        """
+        try:
+            if images is None or images.shape[0] == 0:
+                raise ValueError("No input images provided")
+
+            batch_size, height, width, channels = images.shape
+            
+            # Validate input dimensions
+            if len(images.shape) != 4:
+                raise ValueError(f"Expected 4D tensor (batch, height, width, channels), got {len(images.shape)}D")
+            
+            if channels not in [3, 4]:
+                raise ValueError(f"Expected 3 or 4 channels (RGB or RGBA), got {channels}")
+            
+            # Validate minimum input size for all images
+            if height < 64 or width < 64:
+                raise ValueError(f"All input images must be at least 64x64 pixels, got {width}x{height}")
+
+            results = []
+            masks = []
+            reports = []
+            processing_stats = {
+                'total_images': batch_size,
+                'successful': 0,
+                'failed': 0,
+                'auto_adjustments': 0,
+                'avg_processing_time': 0.0,
+                'adjustments_made': []
+            }
+
+            import time
+            total_processing_time = 0.0
+
+            for i in range(batch_size):
+                start_time = time.time()
+                
+                try:
+                    # Convert single image to numpy array
+                    img_np = (images[i].cpu().numpy() * 255).astype(np.uint8)
+
+                    # Initialize processor with base parameters
+                    from .background_remover import EnhancedPixelArtProcessor
+                    processor = EnhancedPixelArtProcessor(
+                        tolerance=tolerance,
+                        edge_sensitivity=edge_sensitivity,
+                        color_clusters=color_clusters,
+                        foreground_bias=foreground_bias,
+                        edge_refinement=edge_refinement,
+                        dither_handling=dither_handling,
+                        binary_threshold=binary_threshold
+                    )
+
+                    # Auto-adjust parameters if enabled
+                    adjustments = {}
+                    if auto_adjust:
+                        adjustments = processor.auto_adjust_parameters(img_np)
+                        if adjustments:
+                            processing_stats['auto_adjustments'] += 1
+                            processing_stats['adjustments_made'].append({
+                                'image_index': i,
+                                'adjustments': adjustments
+                            })
+                            
+                            # Apply adjustments
+                            if 'tolerance' in adjustments:
+                                processor.tolerance = adjustments['tolerance']
+                            if 'edge_sensitivity' in adjustments:
+                                processor.edge_sensitivity = adjustments['edge_sensitivity']
+                            if 'foreground_bias' in adjustments:
+                                processor.foreground_bias = adjustments['foreground_bias']
+
+                    # Process image
+                    rgba_result = processor.remove_background_advanced(img_np)
+
+                    # Extract alpha channel as mask
+                    alpha_channel = rgba_result[:, :, 3]
+                    masks.append(alpha_channel)
+                    results.append(rgba_result)
+
+                    processing_stats['successful'] += 1
+                    
+                    processing_time = time.time() - start_time
+                    total_processing_time += processing_time
+
+                    if progress_reporting:
+                        report = f"Image {i+1}: Processed successfully"
+                        if adjustments:
+                            report += f" (auto-adjusted: {list(adjustments.keys())})"
+                        report += f" in {processing_time:.3f}s"
+                        reports.append(report)
+
+                except Exception as e:
+                    processing_stats['failed'] += 1
+                    error_msg = f"Image {i+1}: Failed - {str(e)}"
+                    reports.append(error_msg)
+                    
+                    # Create empty result for failed image
+                    empty_result = np.zeros_like(img_np if 'img_np' in locals() else (height, width, 4), dtype=np.uint8)
+                    if len(empty_result.shape) == 3 and empty_result.shape[2] == 3:
+                        empty_rgba = np.zeros((empty_result.shape[0], empty_result.shape[1], 4), dtype=np.uint8)
+                        empty_rgba[:, :, :3] = empty_result
+                        empty_result = empty_rgba
+                    results.append(empty_result)
+                    masks.append(np.zeros((height, width), dtype=np.uint8))
+
+            # Calculate statistics
+            processing_stats['avg_processing_time'] = total_processing_time / batch_size if batch_size > 0 else 0.0
+
+            # Convert results to tensors
+            result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+            mask_tensor = torch.from_numpy(np.array(masks)).float() / 255.0
+
+            # Generate summary report
+            summary_report = self._generate_summary_report(processing_stats, reports if progress_reporting else [])
+
+            return (result_tensor, mask_tensor, summary_report)
+
+        except Exception as e:
+            error_report = f"Batch processing failed: {str(e)}"
+            # Return empty tensors in case of complete failure
+            empty_images = torch.zeros_like(images)
+            empty_masks = torch.zeros((images.shape[0], images.shape[1], images.shape[2]))
+            return (empty_images, empty_masks, error_report)
+
+    def _generate_summary_report(self, stats, detailed_reports):
+        """Generate a summary report of batch processing results."""
+        lines = [
+            "=== Batch Processing Report ===",
+            f"Total Images: {stats['total_images']}",
+            f"Successful: {stats['successful']}",
+            f"Failed: {stats['failed']}",
+            f"Success Rate: {(stats['successful']/stats['total_images']*100):.1f}%" if stats['total_images'] > 0 else "N/A",
+            f"Auto-adjustments Applied: {stats['auto_adjustments']}",
+            f"Average Processing Time: {stats['avg_processing_time']:.3f}s per image",
+            ""
+        ]
+
+        if stats['adjustments_made']:
+            lines.append("Auto-adjustment Details:")
+            for adj in stats['adjustments_made']:
+                lines.append(f"  Image {adj['image_index']+1}: {adj['adjustments']}")
+            lines.append("")
+
+        if detailed_reports:
+            lines.append("Detailed Processing Log:")
+            lines.extend(detailed_reports)
+
+        return "\n".join(lines)
 
 # Node registration
 NODE_CLASS_MAPPINGS = {

@@ -126,30 +126,247 @@ class EnhancedPixelArtProcessor:
         return rgba_result
     
     def _edge_based_detection(self, image: np.ndarray) -> np.ndarray:
-        """Detect background using edge analysis."""
+        """Detect background using optimized edge analysis for pixel art."""
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        h, w = gray.shape
         
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        # Use pixel art optimized edge detection
+        if self.dither_handling:  # Assume pixel art mode when dither handling is enabled
+            return self._pixel_art_edge_detection(gray)
+        else:
+            return self._standard_edge_detection(gray)
+    
+    def _pixel_art_edge_detection(self, gray: np.ndarray) -> np.ndarray:
+        """Optimized edge detection specifically for pixel art images."""
+        h, w = gray.shape
         
-        # Edge detection with adaptive threshold
+        # Multi-method edge detection for pixel art
+        edge_maps = []
+        
+        # Method 1: Roberts Cross-Gradient (excellent for sharp pixel edges)
+        roberts_edges = self._roberts_cross_edge_detection(gray)
+        edge_maps.append(roberts_edges)
+        
+        # Method 2: Enhanced Sobel (better noise resistance)
+        sobel_edges = self._enhanced_sobel_edge_detection(gray)
+        edge_maps.append(sobel_edges)
+        
+        # Method 3: Pixel-aware Canny with adaptive thresholds
+        canny_edges = self._pixel_aware_canny(gray)
+        edge_maps.append(canny_edges)
+        
+        # Combine edge maps with weighted voting
+        combined_edges = self._combine_edge_maps(edge_maps)
+        
+        # Apply pixel-perfect morphological operations
+        refined_edges = self._pixel_perfect_morphology(combined_edges)
+        
+        # Smart contour analysis for character shapes
+        mask = self._smart_contour_analysis(refined_edges, gray.shape)
+        
+        return mask
+    
+    def _standard_edge_detection(self, gray: np.ndarray) -> np.ndarray:
+        """Enhanced standard edge detection for photographic images."""
+        h, w = gray.shape
+        
+        # Adaptive noise reduction based on image characteristics
+        noise_level = self._estimate_noise_level(gray)
+        
+        # Scale-aware Gaussian blur
+        blur_size = max(3, min(7, int(np.sqrt(h * w) / 200)))  # Dynamic blur size
+        if blur_size % 2 == 0:  # Ensure odd kernel size
+            blur_size += 1
+        
+        # Apply noise-adaptive preprocessing
+        if noise_level > 15:  # High noise
+            blurred = cv2.bilateralFilter(gray, blur_size, 75, 75)
+        elif noise_level > 8:  # Medium noise
+            blurred = cv2.GaussianBlur(gray, (blur_size, blur_size), 0)
+        else:  # Low noise - preserve details
+            blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        
+        # Multi-scale Canny edge detection
         threshold_val = int(255 * (1.0 - self.edge_sensitivity))
-        edges = cv2.Canny(blurred, threshold_val // 2, threshold_val)
         
-        # Dilate edges to create regions
-        kernel = np.ones((3, 3), np.uint8)
-        edges_dilated = cv2.dilate(edges, kernel, iterations=2)
+        # Fine scale edges
+        edges_fine = cv2.Canny(blurred, threshold_val // 3, threshold_val // 2)
         
-        # Find contours and create mask
-        contours, _ = cv2.findContours(edges_dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Coarse scale edges
+        coarse_blurred = cv2.GaussianBlur(gray, (blur_size + 2, blur_size + 2), 0)
+        edges_coarse = cv2.Canny(coarse_blurred, threshold_val // 2, threshold_val)
         
-        mask = np.zeros(gray.shape, dtype=np.uint8)
+        # Combine multi-scale edges
+        combined_edges = cv2.bitwise_or(edges_fine, edges_coarse)
+        
+        # Adaptive morphological operations
+        kernel_size = max(3, min(7, int(np.sqrt(h * w) / 300)))
+        kernel = np.ones((kernel_size, kernel_size), np.uint8)
+        edges_dilated = cv2.dilate(combined_edges, kernel, iterations=2)
+        
+        # Enhanced contour analysis
+        mask = self._enhanced_contour_analysis(edges_dilated, gray.shape)
+        
+        return mask
+    
+    def _roberts_cross_edge_detection(self, gray: np.ndarray) -> np.ndarray:
+        """Roberts Cross-Gradient operator - ideal for sharp pixel art edges."""
+        # Roberts Cross kernels
+        roberts_cross_v = np.array([[1, 0], [0, -1]], dtype=np.float32)
+        roberts_cross_h = np.array([[0, 1], [-1, 0]], dtype=np.float32)
+        
+        # Apply Roberts operators
+        vertical = cv2.filter2D(gray.astype(np.float32), -1, roberts_cross_v)
+        horizontal = cv2.filter2D(gray.astype(np.float32), -1, roberts_cross_h)
+        
+        # Compute gradient magnitude
+        magnitude = np.sqrt(vertical**2 + horizontal**2)
+        
+        # Normalize and threshold
+        magnitude = np.clip(magnitude, 0, 255).astype(np.uint8)
+        threshold = int(255 * (1.0 - self.edge_sensitivity) * 0.3)  # Roberts is more sensitive
+        
+        _, binary_edges = cv2.threshold(magnitude, threshold, 255, cv2.THRESH_BINARY)
+        return binary_edges
+    
+    def _enhanced_sobel_edge_detection(self, gray: np.ndarray) -> np.ndarray:
+        """Enhanced Sobel edge detection with adaptive parameters."""
+        # Apply Sobel operators
+        sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        
+        # Compute gradient magnitude and direction
+        magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+        
+        # Normalize
+        magnitude = np.clip(magnitude / magnitude.max() * 255, 0, 255).astype(np.uint8)
+        
+        # Adaptive threshold based on edge sensitivity
+        threshold = int(255 * (1.0 - self.edge_sensitivity) * 0.6)
+        _, binary_edges = cv2.threshold(magnitude, threshold, 255, cv2.THRESH_BINARY)
+        
+        return binary_edges
+    
+    def _pixel_aware_canny(self, gray: np.ndarray) -> np.ndarray:
+        """Pixel-aware Canny edge detection with minimal blur."""
+        # Minimal blur to preserve pixel boundaries
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0.5)  # Reduced sigma
+        
+        # Adaptive thresholds
+        threshold_val = int(255 * (1.0 - self.edge_sensitivity))
+        low_threshold = max(30, threshold_val // 3)  # Ensure minimum threshold
+        high_threshold = min(200, threshold_val)     # Cap maximum threshold
+        
+        edges = cv2.Canny(blurred, low_threshold, high_threshold)
+        return edges
+    
+    def _combine_edge_maps(self, edge_maps: List[np.ndarray]) -> np.ndarray:
+        """Combine multiple edge maps using weighted voting."""
+        if not edge_maps:
+            return np.zeros_like(edge_maps[0])
+        
+        # Weights: Roberts (sharp edges), Sobel (noise resistance), Canny (completeness)
+        weights = [0.4, 0.35, 0.25]
+        weights = weights[:len(edge_maps)]
+        
+        # Normalize edge maps and combine
+        combined = np.zeros_like(edge_maps[0], dtype=np.float32)
+        for edge_map, weight in zip(edge_maps, weights):
+            normalized = edge_map.astype(np.float32) / 255.0
+            combined += normalized * weight
+        
+        # Threshold combined result
+        _, binary_combined = cv2.threshold((combined * 255).astype(np.uint8), 127, 255, cv2.THRESH_BINARY)
+        return binary_combined
+    
+    def _pixel_perfect_morphology(self, edges: np.ndarray) -> np.ndarray:
+        """Apply pixel-perfect morphological operations preserving sharp edges."""
+        # Use minimal kernels to preserve pixel boundaries
+        kernel_small = np.ones((2, 2), np.uint8)  # Smaller than standard 3x3
+        
+        # Light closing to connect nearby edges without over-smoothing
+        closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_small, iterations=1)
+        
+        # Remove single-pixel noise
+        opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel_small, iterations=1)
+        
+        return opened
+    
+    def _smart_contour_analysis(self, edges: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
+        """Smart contour analysis optimized for character shapes."""
+        h, w = shape
+        
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        mask = np.zeros((h, w), dtype=np.uint8)
+        
+        # Dynamic area threshold based on image size
+        min_area = max(50, (h * w) // 1000)  # Adaptive minimum area
+        max_area = (h * w) * 0.8  # Max 80% of image
+        
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > 100:  # Filter small contours
+            
+            # Area filtering
+            if area < min_area or area > max_area:
+                continue
+            
+            # Aspect ratio filtering (reasonable for character shapes)
+            x, y, cw, ch = cv2.boundingRect(contour)
+            aspect_ratio = float(cw) / ch if ch > 0 else 0
+            
+            # Allow wide range of aspect ratios but filter extreme cases
+            if aspect_ratio < 0.1 or aspect_ratio > 10:
+                continue
+            
+            # Solidity filtering (shape complexity)
+            hull = cv2.convexHull(contour)
+            hull_area = cv2.contourArea(hull)
+            solidity = float(area) / hull_area if hull_area > 0 else 0
+            
+            # Keep reasonably solid shapes (not too fragmented)
+            if solidity > 0.3:  # Allow some complexity for character details
                 cv2.fillPoly(mask, [contour], 255)
         
         return mask
+    
+    def _enhanced_contour_analysis(self, edges: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
+        """Enhanced contour analysis for photographic images."""
+        h, w = shape
+        
+        # Dilate edges slightly for better contour detection
+        kernel = np.ones((3, 3), np.uint8)
+        edges_dilated = cv2.dilate(edges, kernel, iterations=1)
+        
+        # Find contours with hierarchy for nested shapes
+        contours, hierarchy = cv2.findContours(edges_dilated, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        
+        mask = np.zeros((h, w), dtype=np.uint8)
+        
+        # More sophisticated area thresholding
+        image_area = h * w
+        min_area = max(100, image_area // 2000)
+        max_area = image_area * 0.7
+        
+        for i, contour in enumerate(contours):
+            area = cv2.contourArea(contour)
+            
+            if min_area <= area <= max_area:
+                # Check if this is an outer contour (not a hole)
+                if hierarchy[0][i][3] == -1:  # No parent (outer contour)
+                    cv2.fillPoly(mask, [contour], 255)
+        
+        return mask
+    
+    def _estimate_noise_level(self, gray: np.ndarray) -> float:
+        """Estimate noise level in the image for adaptive preprocessing."""
+        # Use Laplacian variance as noise estimate
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        noise_level = laplacian.var()
+        
+        # Normalize to 0-100 scale
+        return min(100, max(0, noise_level / 10))
     
     def _color_clustering_detection(self, image: np.ndarray) -> np.ndarray:
         """Detect background using K-means color clustering with performance optimizations."""
@@ -282,20 +499,136 @@ class EnhancedPixelArtProcessor:
         return (binary_combined * 255).astype(np.uint8)
     
     def _refine_edges(self, mask: np.ndarray, image: Optional[np.ndarray] = None) -> np.ndarray:
-        """Apply morphological operations to refine mask edges."""
-        # Remove small noise
+        """Apply optimized edge refinement based on content type."""
+        if image is not None:
+            # Determine if this looks like pixel art
+            is_pixel_art = self._detect_pixel_art_characteristics(image)
+            
+            if is_pixel_art and self.dither_handling:
+                return self._pixel_art_edge_refinement(mask, image)
+            else:
+                return self._photographic_edge_refinement(mask, image)
+        else:
+            # Fallback to conservative refinement
+            return self._conservative_edge_refinement(mask)
+    
+    def _detect_pixel_art_characteristics(self, image: np.ndarray) -> bool:
+        """Detect if image has pixel art characteristics."""
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image
+        
+        h, w = gray.shape
+        
+        # Check for low resolution (common in pixel art)
+        if h <= 128 or w <= 128:
+            return True
+        
+        # Check for limited color palette
+        unique_colors = len(np.unique(image.reshape(-1, image.shape[-1] if len(image.shape) == 3 else 1), axis=0))
+        total_pixels = h * w
+        color_density = unique_colors / total_pixels
+        
+        # Pixel art typically has low color density
+        if color_density < 0.1:  # Less than 10% unique colors
+            return True
+        
+        # Check for sharp edges (no anti-aliasing)
+        edges = cv2.Canny(gray, 50, 150)
+        edge_pixels = np.sum(edges > 0)
+        
+        if edge_pixels > 0:
+            # Check gradient sharpness around edges
+            grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+            
+            # High gradient values suggest sharp, non-antialiased edges
+            avg_gradient = np.mean(gradient_magnitude[edges > 0])
+            
+            if avg_gradient > 30:  # Sharp edges threshold
+                return True
+        
+        return False
+    
+    def _pixel_art_edge_refinement(self, mask: np.ndarray, image: np.ndarray) -> np.ndarray:
+        """Pixel art specific edge refinement that preserves sharp boundaries."""
+        # Use minimal kernels to preserve pixel-perfect edges
+        kernel_tiny = np.ones((2, 2), np.uint8)
         kernel_small = np.ones((3, 3), np.uint8)
+        
+        # Very light morphological operations
+        # Remove single-pixel noise without affecting shape
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_tiny, iterations=1)
+        
+        # Connect very close pixel groups (1-pixel gaps)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_tiny, iterations=1)
+        
+        # Final light closing to solidify shapes
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_small, iterations=1)
+        
+        # NO Gaussian blur for pixel art - preserves sharp edges
+        
+        return mask
+    
+    def _photographic_edge_refinement(self, mask: np.ndarray, image: np.ndarray) -> np.ndarray:
+        """Enhanced edge refinement for photographic content."""
+        h, w = mask.shape
+        image_area = h * w
+        
+        # Scale-adaptive kernel sizes
+        small_kernel_size = max(3, min(5, int(np.sqrt(image_area) / 300)))
+        large_kernel_size = max(5, min(9, int(np.sqrt(image_area) / 200)))
+        
+        # Ensure odd kernel sizes
+        if small_kernel_size % 2 == 0:
+            small_kernel_size += 1
+        if large_kernel_size % 2 == 0:
+            large_kernel_size += 1
+        
+        kernel_small = np.ones((small_kernel_size, small_kernel_size), np.uint8)
+        kernel_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (large_kernel_size, large_kernel_size))
+        
+        # Progressive refinement
+        # 1. Remove small noise
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_small, iterations=1)
         
-        # Fill small holes
+        # 2. Fill small holes
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_small, iterations=2)
         
-        # Smooth edges with closing operation
-        kernel_smooth = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_smooth, iterations=1)
+        # 3. Smooth edges with larger kernel
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_large, iterations=1)
         
-        # Apply Gaussian blur for softer edges
-        mask = cv2.GaussianBlur(mask, (3, 3), 0)
+        # 4. Apply bilateral filtering for edge-preserving smoothing
+        # Convert to float for bilateral filter
+        mask_float = mask.astype(np.float32) / 255.0
+        
+        # Bilateral filter preserves edges while smoothing noise
+        bilateral_filtered = cv2.bilateralFilter(
+            mask_float, 
+            d=5,  # Neighborhood diameter
+            sigmaColor=0.1,  # Color similarity threshold
+            sigmaSpace=5    # Coordinate space threshold
+        )
+        
+        # Convert back and apply final light Gaussian blur
+        mask = (bilateral_filtered * 255).astype(np.uint8)
+        mask = cv2.GaussianBlur(mask, (3, 3), 0.5)  # Light blur
+        
+        return mask
+    
+    def _conservative_edge_refinement(self, mask: np.ndarray) -> np.ndarray:
+        """Conservative edge refinement when image data is not available."""
+        # Minimal processing to avoid assumptions about content type
+        kernel_small = np.ones((3, 3), np.uint8)
+        
+        # Basic noise removal and hole filling
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_small, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_small, iterations=2)
+        
+        # Very light smoothing
+        mask = cv2.GaussianBlur(mask, (3, 3), 0.5)
         
         return mask
     

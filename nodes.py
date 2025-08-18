@@ -286,11 +286,15 @@ class TransparencyBackgroundRemover:
             
             # Determine dither handling based on edge detection mode
             effective_dither_handling = dither_handling
-            if edge_detection_mode == "PIXEL_ART":
+            if edge_detection_mode == "AUTO":
+                # Use content detection for AUTO mode
+                temp_processor = EnhancedPixelArtProcessor()
+                is_pixel_art = temp_processor._detect_pixel_art_characteristics(img_np)
+                effective_dither_handling = is_pixel_art
+            elif edge_detection_mode == "PIXEL_ART":
                 effective_dither_handling = True
             elif edge_detection_mode == "PHOTOGRAPHIC":
                 effective_dither_handling = False
-            # AUTO mode uses original dither_handling setting
             
             processor = EnhancedPixelArtProcessor(
                 tolerance=tolerance,

@@ -6,13 +6,14 @@
 
 ### ✨ Key Features
 
-- 🎯 **Automatic Background Detection** - Intelligent color clustering and edge analysis
-- 🖼️ **Edge Preservation** - Advanced edge refinement algorithms for crisp boundaries  
-- 🔄 **Batch Processing Support** - Process multiple images efficiently in a single operation
-- 📐 **Power-of-8 Scaling** - Optimized scaling with NEAREST neighbor interpolation for pixel-perfect results
-- 🎨 **Multiple Output Formats** - RGBA with embedded alpha or RGB with separate mask
-- 🖥️ **Dither Pattern Handling** - Specialized processing for pixel art and dithered images
-- ⚙️ **Highly Customizable** - Fine-tune parameters for different image types and requirements
+- 🆕 **Content-Aware Edge Detection** - Automatically adapts processing for **Pixel Art** or **Photographic** images to achieve the best results.
+- 🎯 **Multi-Method Algorithm** - Combines Roberts Cross, Sobel, and Canny edge detection for superior accuracy and detail preservation.
+- 🖼️ **Advanced Edge Refinement** - Specialized algorithms for crisp, pixel-perfect boundaries in pixel art and smooth, clean edges in photos.
+- 🔄 **Batch Processing Support** - Process multiple images efficiently in a single operation.
+- 📐 **Power-of-8 Scaling** - Optimized scaling with NEAREST neighbor interpolation for pixel-perfect results.
+- 🎨 **Multiple Output Formats** - RGBA with embedded alpha or RGB with separate mask.
+- 🖥️ **Dither Pattern Handling** - Specialized processing for pixel art and dithered images.
+- ⚙️ **Highly Customizable** - Fine-tune parameters for different image types and requirements.
 
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover.jpg)
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover1.jpg)
@@ -80,11 +81,12 @@
 
 ### Advanced Options
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| **edge_refinement** | BOOLEAN | True | Apply post-processing edge refinement for smoother boundaries |
-| **dither_handling** | BOOLEAN | True | Enable specialized processing for dithered patterns and pixel art |
-| **batch_processing** | BOOLEAN | True | Process all images in batch (True) or only first image (False) |
+| Parameter | Type | Options | Default | Description |
+|-----------|------|---------|---------|-------------|
+| **edge_detection_mode** | DROPDOWN | AUTO, PIXEL_ART, PHOTOGRAPHIC | AUTO | Selects the edge detection pipeline. AUTO intelligently detects content type. |
+| **edge_refinement** | BOOLEAN | | True | Apply post-processing edge refinement for smoother boundaries |
+| **dither_handling** | BOOLEAN | | True | Enable specialized processing for dithered patterns and pixel art |
+| **batch_processing** | BOOLEAN | | True | Process all images in batch (True) or only first image (False) |
 
 ---
 
@@ -95,9 +97,8 @@
 1. **Load your image** using any ComfyUI image loader node
 2. **Connect the image output** to the `image` input of the TransparencyBackgroundRemover node
 3. **Adjust parameters** based on your image type:
-   - **Photographic images**: Use default settings
-   - **Pixel art**: Enable `dither_handling`, set `edge_sensitivity` to 0.9+
-   - **Complex backgrounds**: Increase `color_clusters` to 12-16
+   - **For most images**: Leave `edge_detection_mode` on `AUTO`.
+   - **For specific needs**: Manually select `PIXEL_ART` or `PHOTOGRAPHIC` to override the automatic detection.
 4. **Connect the outputs** to preview or save nodes
 
 ### Batch Processing Workflow
@@ -111,6 +112,7 @@ Load Images (Batch) → TransparencyBackgroundRemover → Save Images
 ### Pixel Art Optimization
 
 **Recommended settings for pixel art:**
+- `edge_detection_mode`: `PIXEL_ART` (or `AUTO`)
 - `tolerance`: 10-20
 - `edge_sensitivity`: 0.9-1.0
 - `color_clusters`: 4-8
@@ -121,6 +123,7 @@ Load Images (Batch) → TransparencyBackgroundRemover → Save Images
 ### High-Quality Photo Processing
 
 **Recommended settings for photographs:**
+- `edge_detection_mode`: `PHOTOGRAPHIC` (or `AUTO`)
 - `tolerance`: 25-40
 - `edge_sensitivity`: 0.7-0.8
 - `foreground_bias`: 0.8-0.9
@@ -143,6 +146,7 @@ Load Images (Batch) → TransparencyBackgroundRemover → Save Images
       "type": "TransparencyBackgroundRemover",
       "pos": [400, 100],
       "inputs": {
+        "edge_detection_mode": "AUTO",
         "tolerance": 30,
         "edge_sensitivity": 0.8,
         "output_format": "RGBA"
@@ -178,11 +182,12 @@ Load Images (Batch) → TransparencyBackgroundRemover → Save Images
 - **Recommended**: Use power-of-8 dimensions for optimal scaling performance
 
 ### Algorithm Overview
-1. **Color Analysis**: K-means clustering to identify dominant colors
-2. **Background Detection**: Multi-criteria analysis including edge proximity and color distribution
-3. **Edge Refinement**: Gradient-based boundary smoothing
-4. **Alpha Generation**: Soft masking with configurable thresholds
-5. **Post-Processing**: Optional dither handling and edge enhancement
+1. **Content-Aware Analysis**: Detects if the image is pixel art or photographic to select the best pipeline.
+2. **Multi-Method Edge Detection**: Combines Roberts Cross, Sobel, and Canny algorithms for a robust edge map.
+3. **Color Analysis**: K-means clustering to identify dominant background colors.
+4. **Edge Refinement**: Applies specialized, content-aware filters to preserve sharp pixel art lines or create smooth photo edges.
+5. **Alpha Generation**: Creates a soft mask with configurable thresholds.
+6. **Post-Processing**: Optional dither handling and final enhancements.
 
 ---
 
@@ -200,14 +205,14 @@ Load Images (Batch) → TransparencyBackgroundRemover → Save Images
 - Close other memory-intensive applications
 
 **Poor background detection**
-- Increase `tolerance` for similar colors
-- Adjust `color_clusters` (more clusters for complex backgrounds)
-- Try different `foreground_bias` values
+- Try switching the `edge_detection_mode` between `PIXEL_ART` and `PHOTOGRAPHIC`.
+- Adjust `tolerance` for similar colors.
+- Modify `color_clusters` (more clusters for complex backgrounds).
 
-**Jagged edges**
-- Enable `edge_refinement`
-- Increase `edge_sensitivity`
-- For pixel art, ensure `dither_handling` is enabled
+**Jagged or blurry edges**
+- Ensure `edge_detection_mode` is set correctly (`PIXEL_ART` for sharp edges, `PHOTOGRAPHIC` for smooth).
+- Enable `edge_refinement`.
+- Adjust `edge_sensitivity`.
 
 ---
 

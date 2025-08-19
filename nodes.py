@@ -106,6 +106,10 @@ class TransparencyBackgroundRemover:
                     "default": False,
                     "tooltip": "Automatically adjust parameters based on image content analysis"
                 }),
+                "edge_detection_mode": (["AUTO", "PIXEL_ART", "PHOTOGRAPHIC"], {
+                    "default": "AUTO",
+                    "tooltip": "Edge detection optimization: AUTO (detect content type), PIXEL_ART (sharp edges), PHOTOGRAPHIC (smooth edges)"
+                }),
             }
         }
 
@@ -211,7 +215,8 @@ class TransparencyBackgroundRemover:
     def remove_background(self, image, tolerance=30, edge_sensitivity=0.8,
                          foreground_bias=0.7, color_clusters=8, binary_threshold=128,
                          edge_refinement=True, dither_handling=True, output_format="RGBA",
-                         output_size="ORIGINAL", scaling_method="NEAREST", auto_adjust=False):
+                         output_size="ORIGINAL", scaling_method="NEAREST", auto_adjust=False,
+                         edge_detection_mode="AUTO"):
         """
         Main processing function for background removal with error handling.
         """
@@ -242,7 +247,8 @@ class TransparencyBackgroundRemover:
                 output_format=output_format,
                 output_size=output_size,
                 scaling_method=scaling_method,
-                auto_adjust=auto_adjust
+                auto_adjust=auto_adjust,
+                edge_detection_mode=edge_detection_mode
             )
 
             return (results, masks)
@@ -257,7 +263,8 @@ class TransparencyBackgroundRemover:
     def _process_images(self, image, tolerance=30, edge_sensitivity=0.8,
                        foreground_bias=0.7, color_clusters=8, binary_threshold=128,
                        edge_refinement=True, dither_handling=True, output_format="RGBA",
-                       output_size="ORIGINAL", scaling_method="NEAREST", auto_adjust=False):
+                       output_size="ORIGINAL", scaling_method="NEAREST", auto_adjust=False,
+                       edge_detection_mode="AUTO"):
         """
         Internal method for processing images without error handling wrapper.
         """
@@ -271,14 +278,31 @@ class TransparencyBackgroundRemover:
             img_np = (image[i].cpu().numpy() * 255).astype(np.uint8)
 
             # Initialize processor with parameters
-            from .background_remover import EnhancedPixelArtProcessor
+            try:
+                from .background_remover import EnhancedPixelArtProcessor
+            except ImportError:
+                # Fallback for testing outside package structure
+                from background_remover import EnhancedPixelArtProcessor
+            
+            # Determine dither handling based on edge detection mode
+            effective_dither_handling = dither_handling
+            if edge_detection_mode == "AUTO":
+                # Use content detection for AUTO mode
+                temp_processor = EnhancedPixelArtProcessor()
+                is_pixel_art = temp_processor._detect_pixel_art_characteristics(img_np)
+                effective_dither_handling = is_pixel_art
+            elif edge_detection_mode == "PIXEL_ART":
+                effective_dither_handling = True
+            elif edge_detection_mode == "PHOTOGRAPHIC":
+                effective_dither_handling = False
+            
             processor = EnhancedPixelArtProcessor(
                 tolerance=tolerance,
                 edge_sensitivity=edge_sensitivity,
                 color_clusters=color_clusters,
                 foreground_bias=foreground_bias,
                 edge_refinement=edge_refinement,
-                dither_handling=dither_handling,
+                dither_handling=effective_dither_handling,
                 binary_threshold=binary_threshold
             )
 
@@ -464,7 +488,11 @@ class TransparencyBackgroundRemoverBatch:
                     img_np = (images[i].cpu().numpy() * 255).astype(np.uint8)
 
                     # Initialize processor with base parameters
-                    from .background_remover import EnhancedPixelArtProcessor
+                    try:
+                        from .background_remover import EnhancedPixelArtProcessor
+                    except ImportError:
+                        # Fallback for testing outside package structure
+                        from background_remover import EnhancedPixelArtProcessor
                     processor = EnhancedPixelArtProcessor(
                         tolerance=tolerance,
                         edge_sensitivity=edge_sensitivity,

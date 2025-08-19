@@ -239,7 +239,11 @@ class EnhancedPixelArtProcessor:
         magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
         
         # Normalize
-        magnitude = np.clip(magnitude / magnitude.max() * 255, 0, 255).astype(np.uint8)
+        max_magnitude = magnitude.max()
+        if max_magnitude > 0:
+            magnitude = np.clip(magnitude / max_magnitude * 255, 0, 255).astype(np.uint8)
+        else:
+            magnitude = magnitude.astype(np.uint8)
         
         # Adaptive threshold based on edge sensitivity
         threshold = int(255 * (1.0 - self.edge_sensitivity) * 0.6)
@@ -263,7 +267,7 @@ class EnhancedPixelArtProcessor:
     def _combine_edge_maps(self, edge_maps: List[np.ndarray]) -> np.ndarray:
         """Combine multiple edge maps using weighted voting."""
         if not edge_maps:
-            return np.zeros_like(edge_maps[0])
+            raise ValueError("Cannot combine an empty list of edge maps.")
         
         # Weights: Roberts (sharp edges), Sobel (noise resistance), Canny (completeness)
         weights = [0.4, 0.35, 0.25]
@@ -545,7 +549,7 @@ class EnhancedPixelArtProcessor:
             gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
             
             # High gradient values suggest sharp, non-antialiased edges
-            avg_gradient = np.mean(gradient_magnitude[edges > 0])
+            avg_gradient = np.mean(gradient_magnitude[edges > 0]) if edge_pixels > 0 else 0
             
             if avg_gradient > 30:  # Sharp edges threshold
                 return True

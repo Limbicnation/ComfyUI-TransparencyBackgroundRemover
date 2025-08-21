@@ -2,4 +2,6 @@ torch
 numpy
 Pillow
 opencv-python
+opencv-contrib-python
 scikit-learn
+ultralytics

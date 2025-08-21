@@ -71,6 +71,10 @@ class AutoGrabCutRemover:
             },
             "optional": {
                 "initial_mask": ("MASK",),
+                "output_format": (["RGBA", "MASK"], {
+                    "default": "RGBA",
+                    "tooltip": "Output format: RGBA with alpha channel or binary MASK (0=background, 255=foreground)"
+                }),
             }
         }
     
@@ -112,7 +116,8 @@ class AutoGrabCutRemover:
                          margin_pixels: int = 20,
                          edge_refinement: float = 0.7,
                          binary_threshold: int = 200,
-                         initial_mask: Optional[torch.Tensor] = None) -> Tuple:
+                         initial_mask: Optional[torch.Tensor] = None,
+                         output_format: str = "RGBA") -> Tuple:
         """
         Process image with automated GrabCut background removal.
         
@@ -200,16 +205,20 @@ class AutoGrabCutRemover:
                     rgb = rgba[:, :, :3].astype(np.float32) / 255.0
                     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
                     
-                    # Apply alpha to create clean result
-                    rgb_clean = rgb.copy()
-                    for c in range(3):
-                        rgb_clean[:, :, c] *= alpha
+                    if output_format == "RGBA":
+                        # For RGBA output: preserve transparency, don't premultiply alpha
+                        # Create 4-channel RGBA tensor
+                        rgba_tensor = torch.from_numpy(rgba.astype(np.float32) / 255.0).float()
+                        processed_images.append(rgba_tensor)
+                    else:  # output_format == "MASK"
+                        # For MASK output: return binary mask as primary output
+                        # Convert alpha to binary mask (0 or 255)
+                        binary_mask = (alpha > 0.5).astype(np.float32)
+                        mask_tensor = torch.from_numpy(binary_mask).float()
+                        processed_images.append(mask_tensor.unsqueeze(-1))  # Add channel dimension
                     
-                    # Convert to tensor format (H, W, C) - ComfyUI format
-                    rgb_tensor = torch.from_numpy(rgb_clean).float()
+                    # Alpha tensor for mask output (always provided)
                     alpha_tensor = torch.from_numpy(alpha).float()
-                    
-                    processed_images.append(rgb_tensor)
                     masks.append(alpha_tensor)
                     
                     # Format bbox and metrics
@@ -228,8 +237,19 @@ class AutoGrabCutRemover:
                               f"Class={object_class}")
                     all_metrics.append(metrics)
                 else:
-                    # Fallback: return original with full opacity
-                    rgb_tensor = torch.from_numpy(img_np.astype(np.float32) / 255.0)
+                    # Fallback: handle based on output format
+                    if output_format == "RGBA":
+                        # Return original RGB with full alpha channel
+                        h, w = img_np.shape[:2]
+                        rgba_fallback = np.zeros((h, w, 4), dtype=np.float32)
+                        rgba_fallback[:, :, :3] = img_np.astype(np.float32) / 255.0
+                        rgba_fallback[:, :, 3] = 1.0  # Full opacity
+                        rgb_tensor = torch.from_numpy(rgba_fallback).float()
+                    else:  # output_format == "MASK"
+                        # Return full foreground mask
+                        alpha_fallback = np.ones((img_np.shape[0], img_np.shape[1], 1), dtype=np.float32)
+                        rgb_tensor = torch.from_numpy(alpha_fallback).float()
+                    
                     alpha_tensor = torch.ones((img_np.shape[0], img_np.shape[1]), dtype=torch.float32)
                     
                     processed_images.append(rgb_tensor)
@@ -245,8 +265,14 @@ class AutoGrabCutRemover:
                 if len(processed_images) > 0:
                     # Use dimensions from previous successful processing
                     h, w = processed_images[0].shape[:2]
-                    
-                rgb_tensor = torch.zeros((h, w, 3), dtype=torch.float32)
+                
+                if output_format == "RGBA":
+                    # Empty RGBA tensor
+                    rgb_tensor = torch.zeros((h, w, 4), dtype=torch.float32)
+                else:  # output_format == "MASK"
+                    # Empty mask tensor (single channel)
+                    rgb_tensor = torch.zeros((h, w, 1), dtype=torch.float32)
+                
                 alpha_tensor = torch.zeros((h, w), dtype=torch.float32)
                 
                 processed_images.append(rgb_tensor)

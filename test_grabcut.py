@@ -178,7 +178,8 @@ def test_comfyui_node():
         node = AutoGrabCutRemover()
         print("✓ Created AutoGrabCutRemover node")
         
-        # Process
+        # Test RGBA output format
+        print("\n--- Testing RGBA output format ---")
         output_image, output_mask, bbox_coords, confidence, metrics = node.remove_background(
             image=test_tensor,
             object_class="auto",
@@ -186,15 +187,53 @@ def test_comfyui_node():
             grabcut_iterations=5,
             margin_pixels=20,
             edge_refinement=0.7,
-            binary_threshold=200
+            binary_threshold=200,
+            output_format="RGBA"
         )
         
-        print("✓ Node processing successful!")
+        print("✓ RGBA processing successful!")
         print(f"  - Output image shape: {output_image.shape}")
         print(f"  - Output mask shape: {output_mask.shape}")
+        print(f"  - Image channels: {output_image.shape[-1] if len(output_image.shape) >= 3 else 'Unknown'}")
         print(f"  - Bounding box: {bbox_coords}")
         print(f"  - Confidence: {confidence:.2f}")
         print(f"  - Metrics: {metrics}")
+        
+        # Verify RGBA format
+        if len(output_image.shape) >= 3 and output_image.shape[-1] == 4:
+            print("✓ RGBA format verified (4 channels)")
+        else:
+            print(f"⚠ Expected 4 channels for RGBA, got {output_image.shape[-1] if len(output_image.shape) >= 3 else 'Unknown'}")
+        
+        # Test MASK output format  
+        print("\n--- Testing MASK output format ---")
+        output_image_mask, output_mask_mask, bbox_coords_mask, confidence_mask, metrics_mask = node.remove_background(
+            image=test_tensor,
+            object_class="auto",
+            confidence_threshold=0.5,
+            grabcut_iterations=5,
+            margin_pixels=20,
+            edge_refinement=0.7,
+            binary_threshold=200,
+            output_format="MASK"
+        )
+        
+        print("✓ MASK processing successful!")
+        print(f"  - Output image shape: {output_image_mask.shape}")
+        print(f"  - Output mask shape: {output_mask_mask.shape}")
+        print(f"  - Image channels: {output_image_mask.shape[-1] if len(output_image_mask.shape) >= 3 else 'Unknown'}")
+        print(f"  - Bounding box: {bbox_coords_mask}")
+        print(f"  - Confidence: {confidence_mask:.2f}")
+        print(f"  - Metrics: {metrics_mask}")
+        
+        # Verify MASK format
+        if len(output_image_mask.shape) >= 3 and output_image_mask.shape[-1] == 1:
+            print("✓ MASK format verified (1 channel)")
+            # Check if mask is binary
+            mask_values = torch.unique(output_image_mask)
+            print(f"  - Unique mask values: {mask_values.tolist()}")
+        else:
+            print(f"⚠ Expected 1 channel for MASK, got {output_image_mask.shape[-1] if len(output_image_mask.shape) >= 3 else 'Unknown'}")
         
         # Test refinement node
         refinement_node = GrabCutRefinement()

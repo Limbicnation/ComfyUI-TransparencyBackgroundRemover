@@ -344,7 +344,7 @@ class GrabCutRefinement:
         """Initialize processor for refinement."""
         try:
             self.processor = GrabCutProcessor(iterations=3)
-        except:
+        except Exception:
             self.processor = create_fallback_processor()(iterations=3)
     
     def refine_mask(self, image: torch.Tensor, mask: torch.Tensor,

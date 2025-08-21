@@ -10,7 +10,7 @@ import os
 class GrabCutProcessor:
     """
     Advanced GrabCut background removal with automated object detection.
-    Combines YOLOv5 object detection with OpenCV's GrabCut algorithm for
+    Combines YOLOv8 object detection with OpenCV's GrabCut algorithm for
     precise foreground extraction with zero manual intervention.
     """
     

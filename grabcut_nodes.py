@@ -27,7 +27,6 @@ class ScalingMixin:
     """
     
     # Class-level constants
-    PIXEL_TOLERANCE = 1  # Tolerance in pixels for matching target dimensions
     
     # Class-level resampling map to avoid recreation on every call
     _RESAMPLING_MAP = {
@@ -110,7 +109,6 @@ class ScalingMixin:
             return image_pil
             
         current_size = (image_pil.width, image_pil.height)
-        target_w, target_h = target_size
         
         # If already at target size, return as-is
         if current_size == target_size:
@@ -123,9 +121,8 @@ class ScalingMixin:
         new_width = int(image_pil.width * scale_factor)
         new_height = int(image_pil.height * scale_factor)
         
-        # If calculated size matches target exactly, use target dimensions
-        if abs(new_width - target_w) <= self.PIXEL_TOLERANCE and abs(new_height - target_h) <= self.PIXEL_TOLERANCE:
-            new_width, new_height = target_w, target_h
+        # Note: Removed dimension snapping to preserve perfect aspect ratio
+        # The scaled image will fit within target dimensions, potentially smaller on one axis
         
         # Use class-level resampling map for better performance
         resampling_method = self._RESAMPLING_MAP.get(scaling_method, Image.Resampling.NEAREST)

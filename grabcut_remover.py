@@ -7,6 +7,60 @@ from ultralytics import YOLO
 import os
 
 
+# Parameter Adjustment Thresholds and Constants
+# These constants define the thresholds used in auto_adjust_parameters()
+# for intelligent parameter tuning based on image characteristics
+
+# Contrast Analysis Thresholds
+_CONTRAST_HIGH = 40          # High contrast threshold - allows lower confidence
+_CONTRAST_LOW = 25           # Low contrast threshold - requires higher confidence
+
+# Edge Density Thresholds  
+_EDGE_DENSITY_HIGH = 0.08    # High edge density - clear edges detected
+_EDGE_DENSITY_LOW = 0.04     # Low edge density - few edges detected
+_EDGE_DENSITY_SHARP = 0.1    # Very sharp edges - can use smaller margin
+_EDGE_DENSITY_SOFT = 0.05    # Soft edges - need larger margin
+
+# Complexity Score Calculation Constants
+_EDGE_DENSITY_MULTIPLIER = 10      # Weight for edge density in complexity score
+_COLOR_VARIANCE_DIVISOR = 1000     # Divisor for color variance normalization
+
+# Complexity Score Thresholds
+_COMPLEXITY_HIGH = 1.5       # High complexity - more iterations needed
+_COMPLEXITY_LOW = 0.5        # Low complexity - fewer iterations sufficient
+
+# Laplacian Variance Thresholds (noise/sharpness detection)
+_LAPLACIAN_HIGH_NOISE = 1000      # High noise level - reduce edge refinement
+_LAPLACIAN_SHARP_EDGES = 500      # Sharp, well-defined edges
+_LAPLACIAN_SOFT_EDGES = 100       # Soft or unclear edges
+_LAPLACIAN_LOW_NOISE = 200        # Low noise level - can use stronger refinement
+
+# Brightness Thresholds
+_BRIGHTNESS_DARK = 80        # Dark image threshold - lower binary threshold
+_BRIGHTNESS_BRIGHT = 180     # Bright image threshold - higher binary threshold
+
+# Parameter Adjustment Values
+_CONFIDENCE_ADJUSTMENT_DOWN = 0.1    # Amount to decrease confidence for clear images
+_CONFIDENCE_ADJUSTMENT_UP = 0.15     # Amount to increase confidence for unclear images
+_ITERATIONS_ADJUSTMENT = 2           # Amount to adjust iterations
+_MARGIN_ADJUSTMENT = 5              # Amount to adjust margin pixels
+_REFINEMENT_ADJUSTMENT = 0.2        # Amount to adjust edge refinement strength
+_BINARY_THRESHOLD_ADJUSTMENT = 30   # Amount to adjust binary threshold for dark images
+_BINARY_THRESHOLD_BRIGHT_ADJUSTMENT = 20  # Amount to adjust for bright images
+
+# Parameter Limits
+_CONFIDENCE_MIN = 0.3        # Minimum confidence threshold
+_CONFIDENCE_MAX = 0.8        # Maximum confidence threshold
+_ITERATIONS_MIN = 3          # Minimum GrabCut iterations
+_ITERATIONS_MAX = 8          # Maximum GrabCut iterations
+_MARGIN_MIN = 10            # Minimum margin pixels
+_MARGIN_MAX = 35            # Maximum margin pixels
+_REFINEMENT_MIN = 0.4       # Minimum edge refinement strength
+_REFINEMENT_MAX = 0.9       # Maximum edge refinement strength
+_BINARY_THRESHOLD_MIN = 150  # Minimum binary threshold
+_BINARY_THRESHOLD_MAX = 240  # Maximum binary threshold
+
+
 class GrabCutProcessor:
     """
     Advanced GrabCut background removal with automated object detection.
@@ -298,49 +352,49 @@ class GrabCutProcessor:
         
         # Adjust confidence_threshold based on contrast and edge clarity
         base_confidence = self.confidence_threshold
-        if contrast > 40 and edge_density > 0.08:
+        if contrast > _CONTRAST_HIGH and edge_density > _EDGE_DENSITY_HIGH:
             # High contrast, clear edges -> can lower confidence threshold
-            adjustments['confidence_threshold'] = max(0.3, base_confidence - 0.1)
-        elif contrast < 25 or edge_density < 0.04:
+            adjustments['confidence_threshold'] = max(_CONFIDENCE_MIN, base_confidence - _CONFIDENCE_ADJUSTMENT_DOWN)
+        elif contrast < _CONTRAST_LOW or edge_density < _EDGE_DENSITY_LOW:
             # Low contrast or few edges -> need higher confidence threshold
-            adjustments['confidence_threshold'] = min(0.8, base_confidence + 0.15)
+            adjustments['confidence_threshold'] = min(_CONFIDENCE_MAX, base_confidence + _CONFIDENCE_ADJUSTMENT_UP)
         
         # Adjust iterations based on image complexity
         base_iterations = self.iterations
-        complexity_score = (edge_density * 10) + (color_variance / 1000)
-        if complexity_score > 1.5:
+        complexity_score = (edge_density * _EDGE_DENSITY_MULTIPLIER) + (color_variance / _COLOR_VARIANCE_DIVISOR)
+        if complexity_score > _COMPLEXITY_HIGH:
             # High complexity -> more iterations needed
-            adjustments['iterations'] = min(8, base_iterations + 2)
-        elif complexity_score < 0.5:
+            adjustments['iterations'] = min(_ITERATIONS_MAX, base_iterations + _ITERATIONS_ADJUSTMENT)
+        elif complexity_score < _COMPLEXITY_LOW:
             # Low complexity -> fewer iterations sufficient
-            adjustments['iterations'] = max(3, base_iterations - 1)
+            adjustments['iterations'] = max(_ITERATIONS_MIN, base_iterations - _ITERATIONS_ADJUSTMENT)
         
         # Adjust margin_pixels based on edge sharpness and object size estimation
         base_margin = self.margin_pixels
-        if edge_density > 0.1 and laplacian_var > 500:
+        if edge_density > _EDGE_DENSITY_SHARP and laplacian_var > _LAPLACIAN_SHARP_EDGES:
             # Sharp, well-defined edges -> can use smaller margin
-            adjustments['margin_pixels'] = max(10, base_margin - 5)
-        elif edge_density < 0.05 or laplacian_var < 100:
+            adjustments['margin_pixels'] = max(_MARGIN_MIN, base_margin - _MARGIN_ADJUSTMENT)
+        elif edge_density < _EDGE_DENSITY_SOFT or laplacian_var < _LAPLACIAN_SOFT_EDGES:
             # Soft or unclear edges -> need larger margin
-            adjustments['margin_pixels'] = min(35, base_margin + 10)
+            adjustments['margin_pixels'] = min(_MARGIN_MAX, base_margin + _MARGIN_ADJUSTMENT)
         
         # Adjust edge_refinement_strength based on noise level
         base_refinement = self.edge_refinement_strength
-        if laplacian_var > 1000:
+        if laplacian_var > _LAPLACIAN_HIGH_NOISE:
             # High noise -> reduce edge refinement to avoid artifacts
-            adjustments['edge_refinement_strength'] = max(0.4, base_refinement - 0.2)
-        elif laplacian_var < 200:
+            adjustments['edge_refinement_strength'] = max(_REFINEMENT_MIN, base_refinement - _REFINEMENT_ADJUSTMENT)
+        elif laplacian_var < _LAPLACIAN_LOW_NOISE:
             # Low noise -> can use stronger edge refinement
-            adjustments['edge_refinement_strength'] = min(0.9, base_refinement + 0.1)
+            adjustments['edge_refinement_strength'] = min(_REFINEMENT_MAX, base_refinement + _REFINEMENT_ADJUSTMENT)
         
         # Adjust binary_threshold based on brightness distribution
         base_threshold = self.binary_threshold
-        if brightness < 80:
+        if brightness < _BRIGHTNESS_DARK:
             # Dark image -> lower threshold
-            adjustments['binary_threshold'] = max(150, base_threshold - 30)
-        elif brightness > 180:
+            adjustments['binary_threshold'] = max(_BINARY_THRESHOLD_MIN, base_threshold - _BINARY_THRESHOLD_ADJUSTMENT)
+        elif brightness > _BRIGHTNESS_BRIGHT:
             # Bright image -> higher threshold
-            adjustments['binary_threshold'] = min(240, base_threshold + 20)
+            adjustments['binary_threshold'] = min(_BINARY_THRESHOLD_MAX, base_threshold + _BINARY_THRESHOLD_BRIGHT_ADJUSTMENT)
         
         return adjustments
     

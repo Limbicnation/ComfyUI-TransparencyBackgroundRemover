@@ -254,6 +254,10 @@ class AutoGrabCutRemover(ScalingMixin):
                     "step": 8,
                     "tooltip": "Custom height (used when output_size is 'custom')"
                 }),
+                "edge_detection_mode": (["AUTO", "PIXEL_ART", "PHOTOGRAPHIC"], {
+                    "default": "AUTO",
+                    "tooltip": "Edge detection optimization: AUTO (detect content type), PIXEL_ART (sharp edges), PHOTOGRAPHIC (smooth edges)"
+                }),
             }
         }
     
@@ -301,7 +305,8 @@ class AutoGrabCutRemover(ScalingMixin):
                          initial_mask: Optional[torch.Tensor] = None,
                          output_format: str = "RGBA",
                          custom_width: int = 512,
-                         custom_height: int = 512) -> Tuple:
+                         custom_height: int = 512,
+                         edge_detection_mode: str = "AUTO") -> Tuple:
         """
         Process image with automated GrabCut background removal.
         
@@ -313,6 +318,7 @@ class AutoGrabCutRemover(ScalingMixin):
             margin_pixels: Margin around detected object
             edge_refinement: Edge refinement strength
             binary_threshold: Binary mask threshold
+            edge_detection_mode: Edge detection optimization mode
             initial_mask: Optional initial mask from previous processing
             
         Returns:
@@ -328,6 +334,45 @@ class AutoGrabCutRemover(ScalingMixin):
         self.processor.margin_pixels = margin_pixels
         self.processor.edge_refinement_strength = edge_refinement
         self.processor.binary_threshold = binary_threshold
+        
+        # Apply edge detection mode optimizations
+        if edge_detection_mode != "AUTO":
+            if edge_detection_mode == "PIXEL_ART":
+                # Optimize for pixel art: precise edges, minimal smoothing
+                self.processor.edge_refinement_strength = min(0.4, edge_refinement)
+                self.processor.binary_threshold = max(220, binary_threshold)
+                self.processor.margin_pixels = max(5, min(15, margin_pixels))
+            elif edge_detection_mode == "PHOTOGRAPHIC":
+                # Optimize for photos: smooth edges, more refinement
+                self.processor.edge_refinement_strength = min(0.9, edge_refinement + 0.2)
+                self.processor.binary_threshold = max(180, binary_threshold - 20)
+                self.processor.margin_pixels = max(15, min(35, margin_pixels + 10))
+        else:
+            # AUTO mode: detect content type for first image
+            first_image = image[0] if len(image.shape) == 4 else image
+            img_np = (first_image.cpu().numpy() * 255).astype(np.uint8)
+            
+            # Ensure channels last format (H, W, C)
+            if img_np.shape[0] == 3 or img_np.shape[0] == 4:
+                img_np = np.transpose(img_np, (1, 2, 0))
+            
+            # Convert to RGB if needed
+            if img_np.shape[2] == 4:
+                img_np = img_np[:, :, :3]
+            
+            # Detect if pixel art
+            is_pixel_art = self.processor._detect_pixel_art_characteristics(img_np)
+            
+            if is_pixel_art:
+                # Apply pixel art optimizations
+                self.processor.edge_refinement_strength = min(0.4, edge_refinement)
+                self.processor.binary_threshold = max(220, binary_threshold)
+                self.processor.margin_pixels = max(5, min(15, margin_pixels))
+            else:
+                # Apply photographic optimizations
+                self.processor.edge_refinement_strength = min(0.9, edge_refinement + 0.1)
+                self.processor.binary_threshold = max(180, binary_threshold - 10)
+                self.processor.margin_pixels = max(10, min(30, margin_pixels + 5))
         
         # Auto-adjust parameters if enabled (applied to first image for batch processing)
         if auto_adjust:

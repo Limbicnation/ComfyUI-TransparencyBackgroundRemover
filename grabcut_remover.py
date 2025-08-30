@@ -344,6 +344,73 @@ class GrabCutProcessor:
         
         return adjustments
     
+    def _detect_pixel_art_characteristics(self, image: np.ndarray) -> bool:
+        """
+        Detect if image has pixel art characteristics.
+        Analyzes color count, edge sharpness, and dithering patterns.
+        
+        Args:
+            image: Input image (RGB format)
+            
+        Returns:
+            Boolean indicating if image appears to be pixel art
+        """
+        # Convert to grayscale for analysis
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        h, w = gray.shape
+        total_pixels = h * w
+        
+        # 1. Color count analysis - pixel art typically has limited colors
+        unique_colors = len(np.unique(image.reshape(-1, 3), axis=0))
+        color_density = unique_colors / total_pixels
+        
+        # 2. Edge sharpness analysis - pixel art has very sharp edges
+        # Calculate edge sharpness using Laplacian variance
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        # 3. Dither pattern detection - look for regular patterns
+        # Use FFT to detect repeating patterns
+        fft = np.fft.fft2(gray)
+        fft_magnitude = np.abs(fft)
+        
+        # Look for peaks in frequency domain that suggest regular patterns
+        # Remove DC component and low frequencies
+        fft_magnitude[0:5, 0:5] = 0
+        peak_ratio = np.max(fft_magnitude) / np.mean(fft_magnitude)
+        
+        # 4. Small dimensions often indicate pixel art
+        is_small = w <= 512 or h <= 512
+        
+        # Decision logic based on multiple factors
+        pixel_art_score = 0
+        
+        # Low color density suggests pixel art
+        if color_density < 0.01:  # Very limited colors
+            pixel_art_score += 3
+        elif color_density < 0.05:  # Limited colors
+            pixel_art_score += 2
+        elif color_density < 0.1:  # Somewhat limited colors
+            pixel_art_score += 1
+        
+        # High edge sharpness suggests pixel art
+        if laplacian_var > 1000:  # Very sharp edges
+            pixel_art_score += 2
+        elif laplacian_var > 500:  # Sharp edges
+            pixel_art_score += 1
+        
+        # Regular patterns suggest dithering/pixel art
+        if peak_ratio > 50:  # Strong regular patterns
+            pixel_art_score += 2
+        elif peak_ratio > 20:  # Moderate patterns
+            pixel_art_score += 1
+        
+        # Small dimensions bonus
+        if is_small:
+            pixel_art_score += 1
+        
+        # Threshold for pixel art detection
+        return pixel_art_score >= 3
+    
     def process_with_grabcut(self, image: np.ndarray, target_class: Optional[str] = None) -> Dict:
         """
         Complete GrabCut processing pipeline with automated object detection.

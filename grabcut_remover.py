@@ -261,6 +261,89 @@ class GrabCutProcessor:
         
         return (binary * 255).astype(np.uint8)
     
+    def auto_adjust_parameters(self, image: np.ndarray) -> dict:
+        """
+        Automatically adjust parameters based on image analysis.
+        Analyzes image characteristics and returns optimal parameter adjustments.
+        
+        Args:
+            image: Input image for analysis (RGB format)
+            
+        Returns:
+            Dictionary of adjusted parameters
+        """
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        h, w = gray.shape
+        total_pixels = h * w
+        
+        # Analyze image characteristics
+        # 1. Edge density analysis
+        edges = cv2.Canny(gray, 50, 150)
+        edge_density = np.sum(edges > 0) / total_pixels
+        
+        # 2. Contrast analysis
+        contrast = gray.std()
+        
+        # 3. Brightness distribution
+        brightness = gray.mean()
+        
+        # 4. Color variance analysis
+        color_variance = np.var(image.reshape(-1, 3), axis=0).mean()
+        
+        # 5. Noise level estimation (using Laplacian variance)
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        # Initialize adjustments dictionary
+        adjustments = {}
+        
+        # Adjust confidence_threshold based on contrast and edge clarity
+        base_confidence = self.confidence_threshold
+        if contrast > 40 and edge_density > 0.08:
+            # High contrast, clear edges -> can lower confidence threshold
+            adjustments['confidence_threshold'] = max(0.3, base_confidence - 0.1)
+        elif contrast < 25 or edge_density < 0.04:
+            # Low contrast or few edges -> need higher confidence threshold
+            adjustments['confidence_threshold'] = min(0.8, base_confidence + 0.15)
+        
+        # Adjust iterations based on image complexity
+        base_iterations = self.iterations
+        complexity_score = (edge_density * 10) + (color_variance / 1000)
+        if complexity_score > 1.5:
+            # High complexity -> more iterations needed
+            adjustments['iterations'] = min(8, base_iterations + 2)
+        elif complexity_score < 0.5:
+            # Low complexity -> fewer iterations sufficient
+            adjustments['iterations'] = max(3, base_iterations - 1)
+        
+        # Adjust margin_pixels based on edge sharpness and object size estimation
+        base_margin = self.margin_pixels
+        if edge_density > 0.1 and laplacian_var > 500:
+            # Sharp, well-defined edges -> can use smaller margin
+            adjustments['margin_pixels'] = max(10, base_margin - 5)
+        elif edge_density < 0.05 or laplacian_var < 100:
+            # Soft or unclear edges -> need larger margin
+            adjustments['margin_pixels'] = min(35, base_margin + 10)
+        
+        # Adjust edge_refinement_strength based on noise level
+        base_refinement = self.edge_refinement_strength
+        if laplacian_var > 1000:
+            # High noise -> reduce edge refinement to avoid artifacts
+            adjustments['edge_refinement_strength'] = max(0.4, base_refinement - 0.2)
+        elif laplacian_var < 200:
+            # Low noise -> can use stronger edge refinement
+            adjustments['edge_refinement_strength'] = min(0.9, base_refinement + 0.1)
+        
+        # Adjust binary_threshold based on brightness distribution
+        base_threshold = self.binary_threshold
+        if brightness < 80:
+            # Dark image -> lower threshold
+            adjustments['binary_threshold'] = max(150, base_threshold - 30)
+        elif brightness > 180:
+            # Bright image -> higher threshold
+            adjustments['binary_threshold'] = min(240, base_threshold + 20)
+        
+        return adjustments
+    
     def process_with_grabcut(self, image: np.ndarray, target_class: Optional[str] = None) -> Dict:
         """
         Complete GrabCut processing pipeline with automated object detection.

@@ -229,6 +229,10 @@ class AutoGrabCutRemover(ScalingMixin):
                     "default": "NEAREST",
                     "tooltip": "Interpolation method for scaling: NEAREST (pixel-perfect), BILINEAR (smooth), BICUBIC (high-quality), LANCZOS (best quality)"
                 }),
+                "auto_adjust": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Automatically adjust parameters based on image content analysis"
+                }),
             },
             "optional": {
                 "initial_mask": ("MASK",),
@@ -293,6 +297,7 @@ class AutoGrabCutRemover(ScalingMixin):
                          binary_threshold: int = 200,
                          output_size: str = "ORIGINAL",
                          scaling_method: str = "NEAREST",
+                         auto_adjust: bool = False,
                          initial_mask: Optional[torch.Tensor] = None,
                          output_format: str = "RGBA",
                          custom_width: int = 512,
@@ -323,6 +328,31 @@ class AutoGrabCutRemover(ScalingMixin):
         self.processor.margin_pixels = margin_pixels
         self.processor.edge_refinement_strength = edge_refinement
         self.processor.binary_threshold = binary_threshold
+        
+        # Auto-adjust parameters if enabled (applied to first image for batch processing)
+        if auto_adjust:
+            # Get first image for analysis
+            first_image = image[0] if len(image.shape) == 4 else image
+            
+            # Convert to numpy for analysis
+            img_np = (first_image.cpu().numpy() * 255).astype(np.uint8)
+            
+            # Ensure channels last format (H, W, C)
+            if img_np.shape[0] == 3 or img_np.shape[0] == 4:
+                img_np = np.transpose(img_np, (1, 2, 0))
+            
+            # Convert to RGB if needed
+            if img_np.shape[2] == 4:
+                img_np = img_np[:, :, :3]
+            
+            # Get parameter adjustments
+            adjustments = self.processor.auto_adjust_parameters(img_np)
+            
+            # Apply adjustments to processor
+            if adjustments:
+                for param, value in adjustments.items():
+                    if hasattr(self.processor, param):
+                        setattr(self.processor, param, value)
         
         # Handle batch dimension
         if len(image.shape) == 4:

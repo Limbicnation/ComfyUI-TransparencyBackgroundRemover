@@ -20,7 +20,146 @@ except ImportError:
     from grabcut_remover import GrabCutProcessor, create_fallback_processor
 
 
-class AutoGrabCutRemover:
+class ScalingMixin:
+    """
+    Mixin class providing shared scaling functionality for GrabCut nodes.
+    Eliminates code duplication and improves performance.
+    """
+    
+    # Class-level resampling map to avoid recreation on every call
+    _RESAMPLING_MAP = {
+        "NEAREST": Image.Resampling.NEAREST,
+        "BILINEAR": Image.Resampling.BILINEAR,
+        "BICUBIC": Image.Resampling.BICUBIC,
+        "LANCZOS": Image.Resampling.LANCZOS
+    }
+    
+    @staticmethod
+    def parse_output_size(size_string: str) -> Optional[Tuple[int, int]]:
+        """
+        Parse output size string to width, height tuple.
+        
+        Args:
+            size_string: String like "512x512" or "ORIGINAL" or "custom"
+            
+        Returns:
+            Tuple (width, height) or None for ORIGINAL
+        """
+        if size_string == "ORIGINAL":
+            return None
+        elif size_string == "custom":
+            return None  # Will be handled with custom_width/custom_height
+        
+        try:
+            width, height = size_string.split('x')
+            return (int(width), int(height))
+        except ValueError:
+            raise ValueError(f"Invalid output size format: {size_string}")
+    
+    @staticmethod
+    def calculate_scaling_factor(current_size: Tuple[int, int], target_size: Tuple[int, int]) -> float:
+        """
+        Calculate optimal scaling factor.
+        
+        Args:
+            current_size: Tuple (width, height) of current image
+            target_size: Tuple (width, height) of target size
+            
+        Returns:
+            Scaling factor that achieves target size
+        """
+        current_w, current_h = current_size
+        target_w, target_h = target_size
+        
+        # Calculate scale factors for width and height
+        scale_w = target_w / current_w
+        scale_h = target_h / current_h
+        
+        # Use the same scale for both dimensions to maintain aspect ratio
+        # Choose the smaller scale to ensure we don't exceed target dimensions
+        scale_factor = min(scale_w, scale_h)
+        
+        return scale_factor
+    
+    def intelligent_scale(self, image_pil: Image.Image, target_size: Tuple[int, int], scaling_method: str = "NEAREST") -> Image.Image:
+        """
+        Scale image to target dimensions using specified interpolation method.
+        
+        Args:
+            image_pil: PIL Image object
+            target_size: Tuple (width, height) for target dimensions
+            scaling_method: Interpolation method ("NEAREST", "BILINEAR", "BICUBIC", "LANCZOS")
+            
+        Returns:
+            Scaled PIL Image
+        """
+        if target_size is None:
+            return image_pil
+            
+        current_size = (image_pil.width, image_pil.height)
+        target_w, target_h = target_size
+        
+        # If already at target size, return as-is
+        if current_size == target_size:
+            return image_pil
+        
+        # Calculate scaling factor
+        scale_factor = self.calculate_scaling_factor(current_size, target_size)
+        
+        # Apply scaling
+        new_width = int(image_pil.width * scale_factor)
+        new_height = int(image_pil.height * scale_factor)
+        
+        # If calculated size matches target exactly, use target dimensions
+        if abs(new_width - target_w) <= 1 and abs(new_height - target_h) <= 1:
+            new_width, new_height = target_w, target_h
+        
+        # Use class-level resampling map for better performance
+        resampling_method = self._RESAMPLING_MAP.get(scaling_method, Image.Resampling.NEAREST)
+        
+        return image_pil.resize(
+            (new_width, new_height),
+            resampling_method
+        )
+    
+    def _apply_resize(self, image_np: np.ndarray, output_size: str, scaling_method: str, 
+                     custom_width: int, custom_height: int) -> np.ndarray:
+        """
+        Apply resize operation to image array.
+        
+        Args:
+            image_np: Image as numpy array (RGBA format)
+            output_size: Size specification string
+            scaling_method: Scaling method to use
+            custom_width: Custom width for 'custom' size option
+            custom_height: Custom height for 'custom' size option
+            
+        Returns:
+            Resized image as numpy array
+        """
+        if output_size == "ORIGINAL":
+            return image_np
+        
+        # Parse target dimensions
+        if output_size == "custom":
+            target_dimensions = (custom_width, custom_height)
+        else:
+            target_dimensions = self.parse_output_size(output_size)
+        
+        if target_dimensions is None:
+            return image_np
+        
+        # Convert to PIL Image for scaling
+        image_pil = Image.fromarray(image_np, 'RGBA')
+        
+        # Apply intelligent scaling with specified method
+        scaled_pil = self.intelligent_scale(image_pil, target_dimensions, scaling_method)
+        
+        # Convert back to numpy
+        return np.array(scaled_pil)
+
+
+class AutoGrabCutRemover(ScalingMixin):
     """
     ComfyUI node for automated GrabCut background removal with object detection.
     Refines existing background removal or processes raw images.
@@ -119,99 +258,6 @@ class AutoGrabCutRemover:
             print(f"Warning: Could not initialize YOLO-based processor: {e}")
             print("Using fallback processor without YOLO")
             self.processor = create_fallback_processor()()
-    
-    def parse_output_size(self, size_string: str) -> Optional[Tuple[int, int]]:
-        """
-        Parse output size string to width, height tuple.
-        
-        Args:
-            size_string: String like "512x512" or "ORIGINAL" or "custom"
-            
-        Returns:
-            Tuple (width, height) or None for ORIGINAL
-        """
-        if size_string == "ORIGINAL":
-            return None
-        elif size_string == "custom":
-            return None  # Will be handled with custom_width/custom_height
-        
-        try:
-            width, height = size_string.split('x')
-            return (int(width), int(height))
-        except ValueError:
-            raise ValueError(f"Invalid output size format: {size_string}")
-    
-    def calculate_scaling_factor(self, current_size: Tuple[int, int], target_size: Tuple[int, int]) -> float:
-        """
-        Calculate optimal scaling factor.
-        
-        Args:
-            current_size: Tuple (width, height) of current image
-            target_size: Tuple (width, height) of target size
-            
-        Returns:
-            Scaling factor that achieves target size
-        """
-        current_w, current_h = current_size
-        target_w, target_h = target_size
-        
-        # Calculate scale factors for width and height
-        scale_w = target_w / current_w
-        scale_h = target_h / current_h
-        
-        # Use the same scale for both dimensions to maintain aspect ratio
-        # Choose the smaller scale to ensure we don't exceed target dimensions
-        scale_factor = min(scale_w, scale_h)
-        
-        return scale_factor
-    
-    def intelligent_scale(self, image_pil: Image.Image, target_size: Tuple[int, int], scaling_method: str = "NEAREST") -> Image.Image:
-        """
-        Scale image to target dimensions using specified interpolation method.
-        
-        Args:
-            image_pil: PIL Image object
-            target_size: Tuple (width, height) for target dimensions
-            scaling_method: Interpolation method ("NEAREST", "BILINEAR", "BICUBIC", "LANCZOS")
-            
-        Returns:
-            Scaled PIL Image
-        """
-        if target_size is None:
-            return image_pil
-            
-        current_size = (image_pil.width, image_pil.height)
-        target_w, target_h = target_size
-        
-        # If already at target size, return as-is
-        if current_size == target_size:
-            return image_pil
-        
-        # Calculate scaling factor
-        scale_factor = self.calculate_scaling_factor(current_size, target_size)
-        
-        # Apply scaling
-        new_width = int(image_pil.width * scale_factor)
-        new_height = int(image_pil.height * scale_factor)
-        
-        # If calculated size matches target exactly, use target dimensions
-        if abs(new_width - target_w) <= 1 and abs(new_height - target_h) <= 1:
-            new_width, new_height = target_w, target_h
-        
-        # Select resampling method based on scaling_method
-        resampling_map = {
-            "NEAREST": Image.Resampling.NEAREST,
-            "BILINEAR": Image.Resampling.BILINEAR, 
-            "BICUBIC": Image.Resampling.BICUBIC,
-            "LANCZOS": Image.Resampling.LANCZOS
-        }
-        
-        resampling_method = resampling_map.get(scaling_method, Image.Resampling.NEAREST)
-        
-        return image_pil.resize(
-            (new_width, new_height),
-            resampling_method
-        )
     
     def _map_object_class(self, object_class: str) -> Optional[str]:
         """Map UI object class to YOLO class names."""
@@ -322,22 +368,7 @@ class AutoGrabCutRemover:
                     rgba = result['rgba_image']
                     
                     # Apply resize if requested
-                    if output_size != "ORIGINAL":
-                        # Parse target dimensions
-                        if output_size == "custom":
-                            target_dimensions = (custom_width, custom_height)
-                        else:
-                            target_dimensions = self.parse_output_size(output_size)
-                        
-                        if target_dimensions is not None:
-                            # Convert to PIL Image for scaling
-                            rgba_pil = Image.fromarray(rgba, 'RGBA')
-                            
-                            # Apply intelligent scaling with specified method
-                            rgba_scaled = self.intelligent_scale(rgba_pil, target_dimensions, scaling_method)
-                            
-                            # Convert back to numpy
-                            rgba = np.array(rgba_scaled)
+                    rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
                     
                     # Separate RGB and alpha
                     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
@@ -430,7 +461,7 @@ class AutoGrabCutRemover:
         return (output_image, output_mask, bbox_output, confidence_output, metrics_output)
 
 
-class GrabCutRefinement:
+class GrabCutRefinement(ScalingMixin):
     """
     ComfyUI node for refining existing masks using GrabCut.
     Takes an image and mask, refines the mask with GrabCut.
@@ -508,64 +539,6 @@ class GrabCutRefinement:
         except Exception:
             self.processor = create_fallback_processor()(iterations=3)
     
-    def parse_output_size(self, size_string: str) -> Optional[Tuple[int, int]]:
-        """Parse output size string to width, height tuple."""
-        if size_string == "ORIGINAL":
-            return None
-        elif size_string == "custom":
-            return None
-        
-        try:
-            width, height = size_string.split('x')
-            return (int(width), int(height))
-        except ValueError:
-            raise ValueError(f"Invalid output size format: {size_string}")
-    
-    def calculate_scaling_factor(self, current_size: Tuple[int, int], target_size: Tuple[int, int]) -> float:
-        """Calculate optimal scaling factor."""
-        current_w, current_h = current_size
-        target_w, target_h = target_size
-        
-        scale_w = target_w / current_w
-        scale_h = target_h / current_h
-        
-        scale_factor = min(scale_w, scale_h)
-        
-        return scale_factor
-    
-    def intelligent_scale(self, image_pil: Image.Image, target_size: Tuple[int, int], scaling_method: str = "NEAREST") -> Image.Image:
-        """Scale image to target dimensions using specified interpolation method."""
-        if target_size is None:
-            return image_pil
-            
-        current_size = (image_pil.width, image_pil.height)
-        target_w, target_h = target_size
-        
-        if current_size == target_size:
-            return image_pil
-        
-        scale_factor = self.calculate_scaling_factor(current_size, target_size)
-        
-        new_width = int(image_pil.width * scale_factor)
-        new_height = int(image_pil.height * scale_factor)
-        
-        if abs(new_width - target_w) <= 1 and abs(new_height - target_h) <= 1:
-            new_width, new_height = target_w, target_h
-        
-        resampling_map = {
-            "NEAREST": Image.Resampling.NEAREST,
-            "BILINEAR": Image.Resampling.BILINEAR, 
-            "BICUBIC": Image.Resampling.BICUBIC,
-            "LANCZOS": Image.Resampling.LANCZOS
-        }
-        
-        resampling_method = resampling_map.get(scaling_method, Image.Resampling.NEAREST)
-        
-        return image_pil.resize(
-            (new_width, new_height),
-            resampling_method
-        )
-    
     def refine_mask(self, image: torch.Tensor, mask: torch.Tensor,
                    grabcut_iterations: int = 3,
                    edge_refinement: float = 0.5,
@@ -623,22 +596,7 @@ class GrabCutRefinement:
                 rgba = result['rgba_image']
                 
                 # Apply resize if requested
-                if output_size != "ORIGINAL":
-                    # Parse target dimensions
-                    if output_size == "custom":
-                        target_dimensions = (custom_width, custom_height)
-                    else:
-                        target_dimensions = self.parse_output_size(output_size)
-                    
-                    if target_dimensions is not None:
-                        # Convert to PIL Image for scaling
-                        rgba_pil = Image.fromarray(rgba, 'RGBA')
-                        
-                        # Apply intelligent scaling with specified method
-                        rgba_scaled = self.intelligent_scale(rgba_pil, target_dimensions, scaling_method)
-                        
-                        # Convert back to numpy
-                        rgba = np.array(rgba_scaled)
+                rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
                 
                 rgb = rgba[:, :, :3].astype(np.float32) / 255.0
                 alpha = rgba[:, :, 3].astype(np.float32) / 255.0

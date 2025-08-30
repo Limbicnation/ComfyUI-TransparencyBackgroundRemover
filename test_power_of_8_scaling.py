@@ -108,10 +108,12 @@ def test_input_types():
         # Check scaling_method parameter
         if 'scaling_method' in inputs['required']:
             methods = inputs['required']['scaling_method'][0]
-            if methods == ["NEAREST"]:
+            expected_methods = ["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"]
+            if methods == expected_methods:
                 print("✅ scaling_method parameter configured correctly")
             else:
                 print(f"❌ scaling_method wrong: {methods}")
+                print(f"   Expected: {expected_methods}")
                 return False
         else:
             print("❌ scaling_method parameter missing")

@@ -19,6 +19,12 @@
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover1.jpg)
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover-batch.jpg)
 
+<!-- Auto GrabCut Examples -->
+<p align="center">
+  <img src="examples/grabcut_remover.png" width="45%" alt="Auto GrabCut Background Remover Node">
+  <img src="examples/grabcut_remover_result.png" width="45%" alt="Auto GrabCut Result">
+</p>
+
 ---
 
 ## 📦 Installation

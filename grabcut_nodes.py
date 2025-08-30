@@ -26,6 +26,9 @@ class ScalingMixin:
     Eliminates code duplication and improves performance.
     """
     
+    # Class-level constants
+    PIXEL_TOLERANCE = 1  # Tolerance in pixels for matching target dimensions
+    
     # Class-level resampling map to avoid recreation on every call
     _RESAMPLING_MAP = {
         "NEAREST": Image.Resampling.NEAREST,
@@ -59,14 +62,24 @@ class ScalingMixin:
     @staticmethod
     def calculate_scaling_factor(current_size: Tuple[int, int], target_size: Tuple[int, int]) -> float:
         """
-        Calculate optimal scaling factor.
+        Calculate optimal scaling factor while preserving aspect ratio.
+        
+        Uses the smaller of width/height scale factors to ensure the scaled image
+        fits within target dimensions without exceeding them. This means the final
+        image may be smaller than target_size in one dimension to maintain the
+        original aspect ratio.
         
         Args:
             current_size: Tuple (width, height) of current image
             target_size: Tuple (width, height) of target size
             
         Returns:
-            Scaling factor that achieves target size
+            Scaling factor that preserves aspect ratio and fits within target_size
+            
+        Example:
+            current_size=(100, 200), target_size=(150, 150)
+            -> scale_w=1.5, scale_h=0.75, returns min(1.5, 0.75) = 0.75
+            -> final size would be (75, 150) to preserve aspect ratio
         """
         current_w, current_h = current_size
         target_w, target_h = target_size
@@ -111,7 +124,7 @@ class ScalingMixin:
         new_height = int(image_pil.height * scale_factor)
         
         # If calculated size matches target exactly, use target dimensions
-        if abs(new_width - target_w) <= 1 and abs(new_height - target_h) <= 1:
+        if abs(new_width - target_w) <= self.PIXEL_TOLERANCE and abs(new_height - target_h) <= self.PIXEL_TOLERANCE:
             new_width, new_height = target_w, target_h
         
         # Use class-level resampling map for better performance

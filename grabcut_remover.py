@@ -7,6 +7,60 @@ from ultralytics import YOLO
 import os
 
 
+# Parameter Adjustment Thresholds and Constants
+# These constants define the thresholds used in auto_adjust_parameters()
+# for intelligent parameter tuning based on image characteristics
+
+# Contrast Analysis Thresholds
+_CONTRAST_HIGH = 40          # High contrast threshold - allows lower confidence
+_CONTRAST_LOW = 25           # Low contrast threshold - requires higher confidence
+
+# Edge Density Thresholds  
+_EDGE_DENSITY_HIGH = 0.08    # High edge density - clear edges detected
+_EDGE_DENSITY_LOW = 0.04     # Low edge density - few edges detected
+_EDGE_DENSITY_SHARP = 0.1    # Very sharp edges - can use smaller margin
+_EDGE_DENSITY_SOFT = 0.05    # Soft edges - need larger margin
+
+# Complexity Score Calculation Constants
+_EDGE_DENSITY_MULTIPLIER = 10      # Weight for edge density in complexity score
+_COLOR_VARIANCE_DIVISOR = 1000     # Divisor for color variance normalization
+
+# Complexity Score Thresholds
+_COMPLEXITY_HIGH = 1.5       # High complexity - more iterations needed
+_COMPLEXITY_LOW = 0.5        # Low complexity - fewer iterations sufficient
+
+# Laplacian Variance Thresholds (noise/sharpness detection)
+_LAPLACIAN_HIGH_NOISE = 1000      # High noise level - reduce edge refinement
+_LAPLACIAN_SHARP_EDGES = 500      # Sharp, well-defined edges
+_LAPLACIAN_SOFT_EDGES = 100       # Soft or unclear edges
+_LAPLACIAN_LOW_NOISE = 200        # Low noise level - can use stronger refinement
+
+# Brightness Thresholds
+_BRIGHTNESS_DARK = 80        # Dark image threshold - lower binary threshold
+_BRIGHTNESS_BRIGHT = 180     # Bright image threshold - higher binary threshold
+
+# Parameter Adjustment Values
+_CONFIDENCE_ADJUSTMENT_DOWN = 0.1    # Amount to decrease confidence for clear images
+_CONFIDENCE_ADJUSTMENT_UP = 0.15     # Amount to increase confidence for unclear images
+_ITERATIONS_ADJUSTMENT = 2           # Amount to adjust iterations
+_MARGIN_ADJUSTMENT = 5              # Amount to adjust margin pixels
+_REFINEMENT_ADJUSTMENT = 0.2        # Amount to adjust edge refinement strength
+_BINARY_THRESHOLD_ADJUSTMENT = 30   # Amount to adjust binary threshold for dark images
+_BINARY_THRESHOLD_BRIGHT_ADJUSTMENT = 20  # Amount to adjust for bright images
+
+# Parameter Limits
+_CONFIDENCE_MIN = 0.3        # Minimum confidence threshold
+_CONFIDENCE_MAX = 0.8        # Maximum confidence threshold
+_ITERATIONS_MIN = 3          # Minimum GrabCut iterations
+_ITERATIONS_MAX = 8          # Maximum GrabCut iterations
+_MARGIN_MIN = 10            # Minimum margin pixels
+_MARGIN_MAX = 35            # Maximum margin pixels
+_REFINEMENT_MIN = 0.4       # Minimum edge refinement strength
+_REFINEMENT_MAX = 0.9       # Maximum edge refinement strength
+_BINARY_THRESHOLD_MIN = 150  # Minimum binary threshold
+_BINARY_THRESHOLD_MAX = 240  # Maximum binary threshold
+
+
 class GrabCutProcessor:
     """
     Advanced GrabCut background removal with automated object detection.
@@ -260,6 +314,156 @@ class GrabCutProcessor:
         _, binary = cv2.threshold(refined, self.binary_threshold / 255.0, 1.0, cv2.THRESH_BINARY)
         
         return (binary * 255).astype(np.uint8)
+    
+    def auto_adjust_parameters(self, image: np.ndarray) -> dict:
+        """
+        Automatically adjust parameters based on image analysis.
+        Analyzes image characteristics and returns optimal parameter adjustments.
+        
+        Args:
+            image: Input image for analysis (RGB format)
+            
+        Returns:
+            Dictionary of adjusted parameters
+        """
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        h, w = gray.shape
+        total_pixels = h * w
+        
+        # Analyze image characteristics
+        # 1. Edge density analysis
+        edges = cv2.Canny(gray, 50, 150)
+        edge_density = np.sum(edges > 0) / total_pixels
+        
+        # 2. Contrast analysis
+        contrast = gray.std()
+        
+        # 3. Brightness distribution
+        brightness = gray.mean()
+        
+        # 4. Color variance analysis
+        color_variance = np.var(image.reshape(-1, 3), axis=0).mean()
+        
+        # 5. Noise level estimation (using Laplacian variance)
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        # Initialize adjustments dictionary
+        adjustments = {}
+        
+        # Adjust confidence_threshold based on contrast and edge clarity
+        base_confidence = self.confidence_threshold
+        if contrast > _CONTRAST_HIGH and edge_density > _EDGE_DENSITY_HIGH:
+            # High contrast, clear edges -> can lower confidence threshold
+            adjustments['confidence_threshold'] = max(_CONFIDENCE_MIN, base_confidence - _CONFIDENCE_ADJUSTMENT_DOWN)
+        elif contrast < _CONTRAST_LOW or edge_density < _EDGE_DENSITY_LOW:
+            # Low contrast or few edges -> need higher confidence threshold
+            adjustments['confidence_threshold'] = min(_CONFIDENCE_MAX, base_confidence + _CONFIDENCE_ADJUSTMENT_UP)
+        
+        # Adjust iterations based on image complexity
+        base_iterations = self.iterations
+        complexity_score = (edge_density * _EDGE_DENSITY_MULTIPLIER) + (color_variance / _COLOR_VARIANCE_DIVISOR)
+        if complexity_score > _COMPLEXITY_HIGH:
+            # High complexity -> more iterations needed
+            adjustments['iterations'] = min(_ITERATIONS_MAX, base_iterations + _ITERATIONS_ADJUSTMENT)
+        elif complexity_score < _COMPLEXITY_LOW:
+            # Low complexity -> fewer iterations sufficient
+            adjustments['iterations'] = max(_ITERATIONS_MIN, base_iterations - _ITERATIONS_ADJUSTMENT)
+        
+        # Adjust margin_pixels based on edge sharpness and object size estimation
+        base_margin = self.margin_pixels
+        if edge_density > _EDGE_DENSITY_SHARP and laplacian_var > _LAPLACIAN_SHARP_EDGES:
+            # Sharp, well-defined edges -> can use smaller margin
+            adjustments['margin_pixels'] = max(_MARGIN_MIN, base_margin - _MARGIN_ADJUSTMENT)
+        elif edge_density < _EDGE_DENSITY_SOFT or laplacian_var < _LAPLACIAN_SOFT_EDGES:
+            # Soft or unclear edges -> need larger margin
+            adjustments['margin_pixels'] = min(_MARGIN_MAX, base_margin + _MARGIN_ADJUSTMENT)
+        
+        # Adjust edge_refinement_strength based on noise level
+        base_refinement = self.edge_refinement_strength
+        if laplacian_var > _LAPLACIAN_HIGH_NOISE:
+            # High noise -> reduce edge refinement to avoid artifacts
+            adjustments['edge_refinement_strength'] = max(_REFINEMENT_MIN, base_refinement - _REFINEMENT_ADJUSTMENT)
+        elif laplacian_var < _LAPLACIAN_LOW_NOISE:
+            # Low noise -> can use stronger edge refinement
+            adjustments['edge_refinement_strength'] = min(_REFINEMENT_MAX, base_refinement + _REFINEMENT_ADJUSTMENT)
+        
+        # Adjust binary_threshold based on brightness distribution
+        base_threshold = self.binary_threshold
+        if brightness < _BRIGHTNESS_DARK:
+            # Dark image -> lower threshold
+            adjustments['binary_threshold'] = max(_BINARY_THRESHOLD_MIN, base_threshold - _BINARY_THRESHOLD_ADJUSTMENT)
+        elif brightness > _BRIGHTNESS_BRIGHT:
+            # Bright image -> higher threshold
+            adjustments['binary_threshold'] = min(_BINARY_THRESHOLD_MAX, base_threshold + _BINARY_THRESHOLD_BRIGHT_ADJUSTMENT)
+        
+        return adjustments
+    
+    def _detect_pixel_art_characteristics(self, image: np.ndarray) -> bool:
+        """
+        Detect if image has pixel art characteristics.
+        Analyzes color count, edge sharpness, and dithering patterns.
+        
+        Args:
+            image: Input image (RGB format)
+            
+        Returns:
+            Boolean indicating if image appears to be pixel art
+        """
+        # Convert to grayscale for analysis
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        h, w = gray.shape
+        total_pixels = h * w
+        
+        # 1. Color count analysis - pixel art typically has limited colors
+        unique_colors = len(np.unique(image.reshape(-1, 3), axis=0))
+        color_density = unique_colors / total_pixels
+        
+        # 2. Edge sharpness analysis - pixel art has very sharp edges
+        # Calculate edge sharpness using Laplacian variance
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        # 3. Dither pattern detection - look for regular patterns
+        # Use FFT to detect repeating patterns
+        fft = np.fft.fft2(gray)
+        fft_magnitude = np.abs(fft)
+        
+        # Look for peaks in frequency domain that suggest regular patterns
+        # Remove DC component and low frequencies
+        fft_magnitude[0:5, 0:5] = 0
+        peak_ratio = np.max(fft_magnitude) / np.mean(fft_magnitude)
+        
+        # 4. Small dimensions often indicate pixel art
+        is_small = w <= 512 or h <= 512
+        
+        # Decision logic based on multiple factors
+        pixel_art_score = 0
+        
+        # Low color density suggests pixel art
+        if color_density < 0.01:  # Very limited colors
+            pixel_art_score += 3
+        elif color_density < 0.05:  # Limited colors
+            pixel_art_score += 2
+        elif color_density < 0.1:  # Somewhat limited colors
+            pixel_art_score += 1
+        
+        # High edge sharpness suggests pixel art
+        if laplacian_var > 1000:  # Very sharp edges
+            pixel_art_score += 2
+        elif laplacian_var > 500:  # Sharp edges
+            pixel_art_score += 1
+        
+        # Regular patterns suggest dithering/pixel art
+        if peak_ratio > 50:  # Strong regular patterns
+            pixel_art_score += 2
+        elif peak_ratio > 20:  # Moderate patterns
+            pixel_art_score += 1
+        
+        # Small dimensions bonus
+        if is_small:
+            pixel_art_score += 1
+        
+        # Threshold for pixel art detection
+        return pixel_art_score >= 3
     
     def process_with_grabcut(self, image: np.ndarray, target_class: Optional[str] = None) -> Dict:
         """

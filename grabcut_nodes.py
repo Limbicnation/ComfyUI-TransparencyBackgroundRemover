@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from typing import Tuple, Optional
 import time
+from PIL import Image
 
 # Try to import ComfyUI modules
 try:
@@ -19,7 +20,156 @@ except ImportError:
     from grabcut_remover import GrabCutProcessor, create_fallback_processor
 
 
-class AutoGrabCutRemover:
+class ScalingMixin:
+    """
+    Mixin class providing shared scaling functionality for GrabCut nodes.
+    Eliminates code duplication and improves performance.
+    """
+    
+    # Class-level constants
+    
+    # Class-level resampling map to avoid recreation on every call
+    _RESAMPLING_MAP = {
+        "NEAREST": Image.Resampling.NEAREST,
+        "BILINEAR": Image.Resampling.BILINEAR,
+        "BICUBIC": Image.Resampling.BICUBIC,
+        "LANCZOS": Image.Resampling.LANCZOS
+    }
+    
+    @staticmethod
+    def parse_output_size(size_string: str) -> Optional[Tuple[int, int]]:
+        """
+        Parse output size string to width, height tuple.
+        
+        Args:
+            size_string: String like "512x512" or "ORIGINAL" or "custom"
+            
+        Returns:
+            Tuple (width, height) or None for ORIGINAL
+        """
+        if size_string == "ORIGINAL":
+            return None
+        elif size_string == "custom":
+            return None  # Will be handled with custom_width/custom_height
+        
+        try:
+            width, height = size_string.split('x')
+            return (int(width), int(height))
+        except ValueError:
+            raise ValueError(f"Invalid output size format: {size_string}")
+    
+    @staticmethod
+    def calculate_scaling_factor(current_size: Tuple[int, int], target_size: Tuple[int, int]) -> float:
+        """
+        Calculate optimal scaling factor while preserving aspect ratio.
+        
+        Uses the smaller of width/height scale factors to ensure the scaled image
+        fits within target dimensions without exceeding them. This means the final
+        image may be smaller than target_size in one dimension to maintain the
+        original aspect ratio.
+        
+        Args:
+            current_size: Tuple (width, height) of current image
+            target_size: Tuple (width, height) of target size
+            
+        Returns:
+            Scaling factor that preserves aspect ratio and fits within target_size
+            
+        Example:
+            current_size=(100, 200), target_size=(150, 150)
+            -> scale_w=1.5, scale_h=0.75, returns min(1.5, 0.75) = 0.75
+            -> final size would be (75, 150) to preserve aspect ratio
+        """
+        current_w, current_h = current_size
+        target_w, target_h = target_size
+        
+        # Calculate scale factors for width and height
+        scale_w = target_w / current_w
+        scale_h = target_h / current_h
+        
+        # Use the same scale for both dimensions to maintain aspect ratio
+        # Choose the smaller scale to ensure we don't exceed target dimensions
+        scale_factor = min(scale_w, scale_h)
+        
+        return scale_factor
+    
+    def intelligent_scale(self, image_pil: Image.Image, target_size: Tuple[int, int], scaling_method: str = "NEAREST") -> Image.Image:
+        """
+        Scale image to target dimensions using specified interpolation method.
+        
+        Args:
+            image_pil: PIL Image object
+            target_size: Tuple (width, height) for target dimensions
+            scaling_method: Interpolation method ("NEAREST", "BILINEAR", "BICUBIC", "LANCZOS")
+            
+        Returns:
+            Scaled PIL Image
+        """
+        if target_size is None:
+            return image_pil
+            
+        current_size = (image_pil.width, image_pil.height)
+        
+        # If already at target size, return as-is
+        if current_size == target_size:
+            return image_pil
+        
+        # Calculate scaling factor
+        scale_factor = self.calculate_scaling_factor(current_size, target_size)
+        
+        # Apply scaling
+        new_width = int(image_pil.width * scale_factor)
+        new_height = int(image_pil.height * scale_factor)
+        
+        # Note: Removed dimension snapping to preserve perfect aspect ratio
+        # The scaled image will fit within target dimensions, potentially smaller on one axis
+        
+        # Use class-level resampling map for better performance
+        resampling_method = self._RESAMPLING_MAP.get(scaling_method, Image.Resampling.NEAREST)
+        
+        return image_pil.resize(
+            (new_width, new_height),
+            resampling_method
+        )
+    
+    def _apply_resize(self, image_np: np.ndarray, output_size: str, scaling_method: str, 
+                     custom_width: int, custom_height: int) -> np.ndarray:
+        """
+        Apply resize operation to image array.
+        
+        Args:
+            image_np: Image as numpy array (RGBA format)
+            output_size: Size specification string
+            scaling_method: Scaling method to use
+            custom_width: Custom width for 'custom' size option
+            custom_height: Custom height for 'custom' size option
+            
+        Returns:
+            Resized image as numpy array
+        """
+        if output_size == "ORIGINAL":
+            return image_np
+        
+        # Parse target dimensions
+        if output_size == "custom":
+            target_dimensions = (custom_width, custom_height)
+        else:
+            target_dimensions = self.parse_output_size(output_size)
+        
+        if target_dimensions is None:
+            return image_np
+        
+        # Convert to PIL Image for scaling
+        image_pil = Image.fromarray(image_np, 'RGBA')
+        
+        # Apply intelligent scaling with specified method
+        scaled_pil = self.intelligent_scale(image_pil, target_dimensions, scaling_method)
+        
+        # Convert back to numpy
+        return np.array(scaled_pil)
+
+
+class AutoGrabCutRemover(ScalingMixin):
     """
     ComfyUI node for automated GrabCut background removal with object detection.
     Refines existing background removal or processes raw images.
@@ -68,12 +218,42 @@ class AutoGrabCutRemover:
                     "step": 10,
                     "tooltip": "Threshold for binary mask conversion"
                 }),
+                "output_size": (["ORIGINAL", "512x512", "1024x1024", "2048x2048", "custom"], {
+                    "default": "ORIGINAL",
+                    "tooltip": "Target output size for the processed image and mask"
+                }),
+                "scaling_method": (["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"], {
+                    "default": "NEAREST",
+                    "tooltip": "Interpolation method for scaling: NEAREST (pixel-perfect), BILINEAR (smooth), BICUBIC (high-quality), LANCZOS (best quality)"
+                }),
+                "auto_adjust": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Automatically adjust parameters based on image content analysis"
+                }),
             },
             "optional": {
                 "initial_mask": ("MASK",),
                 "output_format": (["RGBA", "MASK"], {
                     "default": "RGBA",
                     "tooltip": "Output format: RGBA with alpha channel or binary MASK (0=background, 255=foreground)"
+                }),
+                "custom_width": ("INT", {
+                    "default": 512,
+                    "min": 64,
+                    "max": 4096,
+                    "step": 8,
+                    "tooltip": "Custom width (used when output_size is 'custom')"
+                }),
+                "custom_height": ("INT", {
+                    "default": 512,
+                    "min": 64,
+                    "max": 4096,
+                    "step": 8,
+                    "tooltip": "Custom height (used when output_size is 'custom')"
+                }),
+                "edge_detection_mode": (["AUTO", "PIXEL_ART", "PHOTOGRAPHIC"], {
+                    "default": "AUTO",
+                    "tooltip": "Edge detection optimization: AUTO (detect content type), PIXEL_ART (sharp edges), PHOTOGRAPHIC (smooth edges)"
                 }),
             }
         }
@@ -116,8 +296,14 @@ class AutoGrabCutRemover:
                          margin_pixels: int = 20,
                          edge_refinement: float = 0.7,
                          binary_threshold: int = 200,
+                         output_size: str = "ORIGINAL",
+                         scaling_method: str = "NEAREST",
+                         auto_adjust: bool = False,
                          initial_mask: Optional[torch.Tensor] = None,
-                         output_format: str = "RGBA") -> Tuple:
+                         output_format: str = "RGBA",
+                         custom_width: int = 512,
+                         custom_height: int = 512,
+                         edge_detection_mode: str = "AUTO") -> Tuple:
         """
         Process image with automated GrabCut background removal.
         
@@ -129,6 +315,7 @@ class AutoGrabCutRemover:
             margin_pixels: Margin around detected object
             edge_refinement: Edge refinement strength
             binary_threshold: Binary mask threshold
+            edge_detection_mode: Edge detection optimization mode
             initial_mask: Optional initial mask from previous processing
             
         Returns:
@@ -144,6 +331,70 @@ class AutoGrabCutRemover:
         self.processor.margin_pixels = margin_pixels
         self.processor.edge_refinement_strength = edge_refinement
         self.processor.binary_threshold = binary_threshold
+        
+        # Apply edge detection mode optimizations
+        if edge_detection_mode != "AUTO":
+            if edge_detection_mode == "PIXEL_ART":
+                # Optimize for pixel art: precise edges, minimal smoothing
+                self.processor.edge_refinement_strength = min(0.4, edge_refinement)
+                self.processor.binary_threshold = max(220, binary_threshold)
+                self.processor.margin_pixels = max(5, min(15, margin_pixels))
+            elif edge_detection_mode == "PHOTOGRAPHIC":
+                # Optimize for photos: smooth edges, more refinement
+                self.processor.edge_refinement_strength = min(0.9, edge_refinement + 0.2)
+                self.processor.binary_threshold = max(180, binary_threshold - 20)
+                self.processor.margin_pixels = max(15, min(35, margin_pixels + 10))
+        else:
+            # AUTO mode: detect content type for first image
+            first_image = image[0] if len(image.shape) == 4 else image
+            img_np = (first_image.cpu().numpy() * 255).astype(np.uint8)
+            
+            # Ensure channels last format (H, W, C)
+            if img_np.shape[0] == 3 or img_np.shape[0] == 4:
+                img_np = np.transpose(img_np, (1, 2, 0))
+            
+            # Convert to RGB if needed
+            if img_np.shape[2] == 4:
+                img_np = img_np[:, :, :3]
+            
+            # Detect if pixel art
+            is_pixel_art = self.processor._detect_pixel_art_characteristics(img_np)
+            
+            if is_pixel_art:
+                # Apply pixel art optimizations
+                self.processor.edge_refinement_strength = min(0.4, edge_refinement)
+                self.processor.binary_threshold = max(220, binary_threshold)
+                self.processor.margin_pixels = max(5, min(15, margin_pixels))
+            else:
+                # Apply photographic optimizations
+                self.processor.edge_refinement_strength = min(0.9, edge_refinement + 0.1)
+                self.processor.binary_threshold = max(180, binary_threshold - 10)
+                self.processor.margin_pixels = max(10, min(30, margin_pixels + 5))
+        
+        # Auto-adjust parameters if enabled (applied to first image for batch processing)
+        if auto_adjust:
+            # Get first image for analysis
+            first_image = image[0] if len(image.shape) == 4 else image
+            
+            # Convert to numpy for analysis
+            img_np = (first_image.cpu().numpy() * 255).astype(np.uint8)
+            
+            # Ensure channels last format (H, W, C)
+            if img_np.shape[0] == 3 or img_np.shape[0] == 4:
+                img_np = np.transpose(img_np, (1, 2, 0))
+            
+            # Convert to RGB if needed
+            if img_np.shape[2] == 4:
+                img_np = img_np[:, :, :3]
+            
+            # Get parameter adjustments
+            adjustments = self.processor.auto_adjust_parameters(img_np)
+            
+            # Apply adjustments to processor
+            if adjustments:
+                for param, value in adjustments.items():
+                    if hasattr(self.processor, param):
+                        setattr(self.processor, param, value)
         
         # Handle batch dimension
         if len(image.shape) == 4:
@@ -201,8 +452,10 @@ class AutoGrabCutRemover:
                     # Convert RGBA result back to tensor format
                     rgba = result['rgba_image']
                     
+                    # Apply resize if requested
+                    rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
+                    
                     # Separate RGB and alpha
-                    rgb = rgba[:, :, :3].astype(np.float32) / 255.0
                     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
                     
                     if output_format == "RGBA":
@@ -293,7 +546,7 @@ class AutoGrabCutRemover:
         return (output_image, output_mask, bbox_output, confidence_output, metrics_output)
 
 
-class GrabCutRefinement:
+class GrabCutRefinement(ScalingMixin):
     """
     ComfyUI node for refining existing masks using GrabCut.
     Takes an image and mask, refines the mask with GrabCut.
@@ -327,6 +580,30 @@ class GrabCutRefinement:
                     "step": 5,
                     "tooltip": "Pixels to expand mask boundary"
                 }),
+                "output_size": (["ORIGINAL", "512x512", "1024x1024", "2048x2048", "custom"], {
+                    "default": "ORIGINAL",
+                    "tooltip": "Target output size for the refined image and mask"
+                }),
+                "scaling_method": (["NEAREST", "BILINEAR", "BICUBIC", "LANCZOS"], {
+                    "default": "NEAREST",
+                    "tooltip": "Interpolation method for scaling"
+                }),
+            },
+            "optional": {
+                "custom_width": ("INT", {
+                    "default": 512,
+                    "min": 64,
+                    "max": 4096,
+                    "step": 8,
+                    "tooltip": "Custom width (used when output_size is 'custom')"
+                }),
+                "custom_height": ("INT", {
+                    "default": 512,
+                    "min": 64,
+                    "max": 4096,
+                    "step": 8,
+                    "tooltip": "Custom height (used when output_size is 'custom')"
+                }),
             }
         }
     
@@ -350,7 +627,11 @@ class GrabCutRefinement:
     def refine_mask(self, image: torch.Tensor, mask: torch.Tensor,
                    grabcut_iterations: int = 3,
                    edge_refinement: float = 0.5,
-                   expand_margin: int = 10) -> Tuple:
+                   expand_margin: int = 10,
+                   output_size: str = "ORIGINAL",
+                   scaling_method: str = "NEAREST",
+                   custom_width: int = 512,
+                   custom_height: int = 512) -> Tuple:
         """
         Refine existing mask using GrabCut.
         
@@ -398,6 +679,10 @@ class GrabCutRefinement:
             
             if result['success']:
                 rgba = result['rgba_image']
+                
+                # Apply resize if requested
+                rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
+                
                 rgb = rgba[:, :, :3].astype(np.float32) / 255.0
                 alpha = rgba[:, :, 3].astype(np.float32) / 255.0
                 

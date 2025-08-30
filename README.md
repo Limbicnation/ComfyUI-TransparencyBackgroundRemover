@@ -19,6 +19,12 @@
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover1.jpg)
 ![ComfyUI-TransparencyBackgroundRemover](examples/ComfyUI-TransparencyBackgroundRemover-batch.jpg)
 
+<!-- Auto GrabCut Examples -->
+<p align="center">
+  <img src="examples/grabcut_remover.png" width="45%" alt="Auto GrabCut Background Remover Node">
+  <img src="examples/grabcut_remover_result.png" width="45%" alt="Auto GrabCut Result">
+</p>
+
 ---
 
 ## 📦 Installation
@@ -165,6 +171,59 @@ Load Images (Batch) → TransparencyBackgroundRemover → Save Images
 - **Outputs**: 
   - `image` → Connect to preview, save, or further processing nodes
   - `mask` → Use for compositing, masking, or additional processing
+
+---
+
+## 🎯 Auto GrabCut Background Remover
+
+### Overview
+The **Auto GrabCut Background Remover** node provides advanced object detection and segmentation using YOLO and GrabCut algorithms. It can automatically detect objects in images and remove backgrounds with high precision, or refine existing masks for better quality.
+
+### Key Features
+- **Automatic Object Detection**: Uses YOLO to identify objects (person, product, vehicle, animal, furniture, electronics)
+- **GrabCut Refinement**: Advanced segmentation algorithm for precise edge detection
+- **Resize Functionality**: Scale output to preset or custom dimensions
+- **Multiple Scaling Methods**: NEAREST (pixel-perfect), BILINEAR, BICUBIC, LANCZOS
+- **Mask Refinement**: Improve existing masks from other background removal tools
+
+### Node Parameters
+
+#### Auto GrabCut Remover
+
+| Parameter | Type | Range/Options | Default | Description |
+|-----------|------|---------------|---------|-------------|
+| **object_class** | DROPDOWN | auto, person, product, vehicle, animal, furniture, electronics | auto | Target object class for detection |
+| **confidence_threshold** | FLOAT | 0.3-0.9 | 0.5 | Minimum confidence for object detection |
+| **grabcut_iterations** | INT | 1-10 | 5 | Number of GrabCut algorithm iterations |
+| **margin_pixels** | INT | 0-50 | 20 | Pixel margin around detected object |
+| **edge_refinement** | FLOAT | 0.0-1.0 | 0.7 | Edge refinement strength (0=none, 1=maximum) |
+| **binary_threshold** | INT | 128-250 | 200 | Threshold for binary mask conversion |
+| **output_size** | DROPDOWN | ORIGINAL, 512x512, 1024x1024, 2048x2048, custom | ORIGINAL | Target output dimensions |
+| **scaling_method** | DROPDOWN | NEAREST, BILINEAR, BICUBIC, LANCZOS | NEAREST | Interpolation method for scaling |
+| **output_format** | DROPDOWN | RGBA, MASK | RGBA | Output format type |
+
+#### Optional Parameters
+| Parameter | Type | Range | Default | Description |
+|-----------|------|-------|---------|-------------|
+| **initial_mask** | MASK | - | - | Initial mask from previous processing |
+| **custom_width** | INT | 64-4096 | 512 | Custom width (when output_size is 'custom') |
+| **custom_height** | INT | 64-4096 | 512 | Custom height (when output_size is 'custom') |
+
+### Usage Examples
+
+#### Basic Object Removal
+1. Connect your image to the Auto GrabCut node
+2. Select the appropriate `object_class` (or leave as "auto")
+3. Adjust `confidence_threshold` if needed
+4. Choose your desired `output_size` and `scaling_method`
+5. Run the workflow
+
+#### Mask Refinement
+Use the **GrabCut Refinement** node to improve masks from other sources:
+1. Connect an image and its existing mask
+2. Adjust `grabcut_iterations` for refinement quality
+3. Set `edge_refinement` for smoothing
+4. Apply resize options if needed
 
 ---
 

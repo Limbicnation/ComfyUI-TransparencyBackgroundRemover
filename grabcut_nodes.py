@@ -298,7 +298,9 @@ class AutoGrabCutRemover(ScalingMixin):
         }
         return mapping.get(object_class, None)
     
-    def remove_background(self, image: torch.Tensor, object_class: str = "auto",
+    def remove_background(self, image: torch.Tensor, 
+                         initial_mask: Optional[torch.Tensor] = None,
+                         object_class: str = "auto",
                          confidence_threshold: float = 0.5,
                          grabcut_iterations: int = 5,
                          margin_pixels: int = 20,
@@ -308,7 +310,6 @@ class AutoGrabCutRemover(ScalingMixin):
                          output_size: str = "ORIGINAL",
                          scaling_method: str = "NEAREST",
                          auto_adjust: bool = False,
-                         initial_mask: Optional[torch.Tensor] = None,
                          output_format: str = "RGBA",
                          custom_width: int = 512,
                          custom_height: int = 512,

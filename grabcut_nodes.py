@@ -211,6 +211,14 @@ class AutoGrabCutRemover(ScalingMixin):
                     "display": "slider",
                     "tooltip": "Edge refinement strength (0=none, 1=maximum)"
                 }),
+                "edge_blur_amount": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 5.0,
+                    "step": 0.1,
+                    "display": "slider",
+                    "tooltip": "Amount of Gaussian blur to apply to mask edges (0=none, 5=maximum)"
+                }),
                 "binary_threshold": ("INT", {
                     "default": 200,
                     "min": 128,
@@ -295,6 +303,7 @@ class AutoGrabCutRemover(ScalingMixin):
                          grabcut_iterations: int = 5,
                          margin_pixels: int = 20,
                          edge_refinement: float = 0.7,
+                         edge_blur_amount: float = 0.0,
                          binary_threshold: int = 200,
                          output_size: str = "ORIGINAL",
                          scaling_method: str = "NEAREST",
@@ -330,6 +339,7 @@ class AutoGrabCutRemover(ScalingMixin):
         self.processor.iterations = grabcut_iterations
         self.processor.margin_pixels = margin_pixels
         self.processor.edge_refinement_strength = edge_refinement
+        self.processor.edge_blur_amount = edge_blur_amount
         self.processor.binary_threshold = binary_threshold
         
         # Apply edge detection mode optimizations
@@ -573,6 +583,14 @@ class GrabCutRefinement(ScalingMixin):
                     "display": "slider",
                     "tooltip": "Edge smoothing strength"
                 }),
+                "edge_blur_amount": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 5.0,
+                    "step": 0.1,
+                    "display": "slider",
+                    "tooltip": "Amount of Gaussian blur to apply to mask edges (0=none, 5=maximum)"
+                }),
                 "expand_margin": ("INT", {
                     "default": 10,
                     "min": 0,
@@ -627,6 +645,7 @@ class GrabCutRefinement(ScalingMixin):
     def refine_mask(self, image: torch.Tensor, mask: torch.Tensor,
                    grabcut_iterations: int = 3,
                    edge_refinement: float = 0.5,
+                   edge_blur_amount: float = 0.0,
                    expand_margin: int = 10,
                    output_size: str = "ORIGINAL",
                    scaling_method: str = "NEAREST",
@@ -651,6 +670,7 @@ class GrabCutRefinement(ScalingMixin):
         # Update parameters
         self.processor.iterations = grabcut_iterations
         self.processor.edge_refinement_strength = edge_refinement
+        self.processor.edge_blur_amount = edge_blur_amount
         self.processor.margin_pixels = expand_margin
         
         # Handle batch

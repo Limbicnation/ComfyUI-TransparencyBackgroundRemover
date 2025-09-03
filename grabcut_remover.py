@@ -316,23 +316,14 @@ class GrabCutProcessor:
         refined = cv2.morphologyEx(refined, cv2.MORPH_CLOSE, kernel)
         refined = cv2.morphologyEx(refined, cv2.MORPH_OPEN, kernel)
         
-        # Convert to 0-255 range for edge blur processing
-        refined_255 = (refined * 255).astype(np.uint8)
-        
-        # Apply edge blur if enabled (before binary thresholding to preserve soft edges)
         if self.edge_blur_amount > 0:
-            refined_255 = self._apply_edge_blur(refined_255)
-            # Convert back to 0-1 range
-            refined = refined_255.astype(np.float32) / 255.0
-        
-        # Apply binary threshold to eliminate semi-transparency (if edge blur is disabled)
-        # If edge blur is enabled, we preserve the soft edges instead of hard thresholding
-        if self.edge_blur_amount <= 0:
+            # Convert to 0-255 range for edge blur processing, apply blur, and return.
+            refined_255 = (refined * 255).astype(np.uint8)
+            return self._apply_edge_blur(refined_255)
+        else:
+            # Apply binary threshold to eliminate semi-transparency for sharp edges.
             _, binary = cv2.threshold(refined, self.binary_threshold / 255.0, 1.0, cv2.THRESH_BINARY)
             return (binary * 255).astype(np.uint8)
-        else:
-            # Return the blurred mask with soft edges preserved
-            return refined_255
     
     def _apply_edge_blur(self, mask: np.ndarray) -> np.ndarray:
         """
@@ -350,13 +341,11 @@ class GrabCutProcessor:
         # Calculate dynamic kernel size based on blur amount
         # Ensure kernel size is odd and reasonable
         kernel_size = int(self.edge_blur_amount * 2) * 2 + 1
-        kernel_size = max(3, min(kernel_size, 31))  # Limit to reasonable range
+        # With edge_blur_amount max 5.0, kernel_size max is 21.
+        kernel_size = max(3, min(kernel_size, 21))
         
-        # Calculate sigma based on blur amount
-        sigma = self.edge_blur_amount * 0.5
-        
-        # Apply Gaussian blur
-        blurred_mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), sigma)
+        # Apply Gaussian blur. Let OpenCV calculate sigma from the kernel size for a standard blur.
+        blurred_mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
         
         return blurred_mask
     
@@ -443,12 +432,12 @@ class GrabCutProcessor:
         
         # Adjust edge_blur_amount based on edge characteristics and noise level
         base_blur = self.edge_blur_amount
-        if edge_density > _EDGE_DENSITY_SHARP and laplacian_var > _LAPLACIAN_SHARP_EDGES:
-            # Sharp, clean edges -> minimal blur to preserve detail
-            adjustments['edge_blur_amount'] = max(_EDGE_BLUR_MIN, base_blur - _EDGE_BLUR_ADJUSTMENT)
-        elif laplacian_var > _LAPLACIAN_HIGH_NOISE or edge_density < _EDGE_DENSITY_SOFT:
+        if laplacian_var > _LAPLACIAN_HIGH_NOISE or edge_density < _EDGE_DENSITY_SOFT:
             # Noisy or soft edges -> apply blur to smooth transitions
             adjustments['edge_blur_amount'] = min(_EDGE_BLUR_MAX, base_blur + _EDGE_BLUR_ADJUSTMENT)
+        elif edge_density > _EDGE_DENSITY_SHARP and laplacian_var > _LAPLACIAN_SHARP_EDGES:
+            # Sharp, clean edges -> minimal blur to preserve detail
+            adjustments['edge_blur_amount'] = max(_EDGE_BLUR_MIN, base_blur - _EDGE_BLUR_ADJUSTMENT)
         elif contrast < _CONTRAST_LOW:
             # Low contrast images benefit from edge blur for smoother results
             adjustments['edge_blur_amount'] = min(_EDGE_BLUR_MAX, base_blur + (_EDGE_BLUR_ADJUSTMENT * 0.5))

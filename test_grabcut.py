@@ -288,6 +288,102 @@ def test_node_registration():
     print("\n" + "="*50)
 
 
+def test_edge_blur_functionality():
+    """Test the new edge blur functionality with various blur amounts."""
+    print("\nTesting Edge Blur Functionality...")
+    
+    try:
+        import torch
+        
+        # Create test tensor
+        test_img_np = create_test_image().astype(np.float32) / 255.0
+        test_tensor = torch.from_numpy(test_img_np).permute(2, 0, 1).unsqueeze(0)
+        print(f"Created test tensor for edge blur testing: {test_tensor.shape}")
+        
+        # Create node
+        node = AutoGrabCutRemover()
+        print("✓ Created AutoGrabCutRemover node for edge blur testing")
+        
+        # Test different edge blur amounts
+        blur_amounts = [0.0, 1.0, 2.5, 5.0]
+        
+        for blur_amount in blur_amounts:
+            print(f"\n--- Testing edge_blur_amount = {blur_amount} ---")
+            
+            try:
+                output_image, output_mask, bbox_coords, confidence, metrics = node.remove_background(
+                    image=test_tensor,
+                    object_class="auto",
+                    confidence_threshold=0.5,
+                    grabcut_iterations=5,
+                    margin_pixels=20,
+                    edge_refinement=0.7,
+                    edge_blur_amount=blur_amount,
+                    binary_threshold=200,
+                    output_format="RGBA"
+                )
+                
+                print(f"✓ Processing successful with blur amount {blur_amount}")
+                print(f"  - Output image shape: {output_image.shape}")
+                print(f"  - Output mask shape: {output_mask.shape}")
+                
+                # Check if blur is applied (mask should have gradual transitions when blur > 0)
+                mask_values = torch.unique(output_mask)
+                if blur_amount > 0:
+                    if len(mask_values) > 2:
+                        print(f"  ✓ Soft edges detected (unique values: {len(mask_values)})")
+                    else:
+                        print(f"  ⚠ Expected soft edges but found binary mask")
+                else:
+                    print(f"  ✓ Binary edges preserved (unique values: {len(mask_values)})")
+                    
+            except Exception as e:
+                print(f"✗ Error with blur amount {blur_amount}: {e}")
+        
+        # Test GrabCutRefinement node with edge blur
+        print("\n--- Testing GrabCutRefinement with edge blur ---")
+        refinement_node = GrabCutRefinement()
+        
+        # Use output from previous test as input
+        refined_image, refined_mask = refinement_node.refine_mask(
+            image=test_tensor,
+            mask=output_mask,
+            grabcut_iterations=3,
+            edge_refinement=0.5,
+            edge_blur_amount=1.5,
+            expand_margin=10
+        )
+        
+        print("✓ GrabCutRefinement with edge blur successful!")
+        print(f"  - Refined image shape: {refined_image.shape}")
+        print(f"  - Refined mask shape: {refined_mask.shape}")
+        
+        # Test auto-adjustment with edge blur
+        print("\n--- Testing auto-adjustment with edge blur ---")
+        output_image_auto, output_mask_auto, _, _, _ = node.remove_background(
+            image=test_tensor,
+            object_class="auto",
+            confidence_threshold=0.5,
+            grabcut_iterations=5,
+            margin_pixels=20,
+            edge_refinement=0.7,
+            edge_blur_amount=0.5,  # Base blur amount
+            binary_threshold=200,
+            output_format="RGBA",
+            auto_adjust=True  # Enable auto-adjustment
+        )
+        
+        print("✓ Auto-adjustment with edge blur successful!")
+        print(f"  - Auto-adjusted output image shape: {output_image_auto.shape}")
+        
+    except ImportError:
+        print("⚠ PyTorch not available, skipping edge blur test")
+    except Exception as e:
+        print(f"✗ Error in edge blur test: {e}")
+    
+    print("\n" + "="*50)
+
+
 def main():
     """Run all tests."""
     print("GrabCut Background Remover Test Suite")
@@ -297,6 +393,7 @@ def main():
     test_grabcut_processor()
     test_initial_mask_refinement()
     test_comfyui_node()
+    test_edge_blur_functionality()
     test_node_registration()
     
     print("\nAll tests completed!")

@@ -25,6 +25,15 @@
   <img src="examples/grabcut_remover_result.png" width="45%" alt="Auto GrabCut Result">
 </p>
 
+<!-- GrabCut Background Remover Examples -->
+<p align="center">
+  <img src="examples/grabcut-background-remover-2.png" alt="GrabCut Background Remover Example">
+</p>
+
+<p align="center">
+  <img src="examples/grabcut-background-remover-pixelart.png" alt="GrabCut Background Remover Pixel Art Example">
+</p>
+
 ---
 
 ## 📦 Installation

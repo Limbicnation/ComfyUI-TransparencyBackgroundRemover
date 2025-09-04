@@ -197,10 +197,12 @@ The **Auto GrabCut Background Remover** node provides advanced object detection 
 | **grabcut_iterations** | INT | 1-10 | 5 | Number of GrabCut algorithm iterations |
 | **margin_pixels** | INT | 0-50 | 20 | Pixel margin around detected object |
 | **edge_refinement** | FLOAT | 0.0-1.0 | 0.7 | Edge refinement strength (0=none, 1=maximum) |
+| **edge_blur_amount** | FLOAT | 0.0-10.0 | 0.0 | Amount of Gaussian blur applied to mask edges for softer transitions (0=sharp edges, 10=maximum smoothing) |
 | **binary_threshold** | INT | 128-250 | 200 | Threshold for binary mask conversion |
 | **output_size** | DROPDOWN | ORIGINAL, 512x512, 1024x1024, 2048x2048, custom | ORIGINAL | Target output dimensions |
 | **scaling_method** | DROPDOWN | NEAREST, BILINEAR, BICUBIC, LANCZOS | NEAREST | Interpolation method for scaling |
 | **output_format** | DROPDOWN | RGBA, MASK | RGBA | Output format type |
+| **auto_adjust** | BOOLEAN | True/False | False | Automatically adjust parameters based on image content analysis |
 
 #### Optional Parameters
 | Parameter | Type | Range | Default | Description |
@@ -223,7 +225,45 @@ Use the **GrabCut Refinement** node to improve masks from other sources:
 1. Connect an image and its existing mask
 2. Adjust `grabcut_iterations` for refinement quality
 3. Set `edge_refinement` for smoothing
-4. Apply resize options if needed
+4. Configure `edge_blur_amount` for desired edge softness:
+   - `0.0`: Preserve existing sharp edges
+   - `0.5-1.0`: Light feathering for natural blending
+   - `1.5-3.0`: Soft edges for seamless compositing
+5. Apply resize options if needed
+
+#### Edge Quality Control Examples
+
+**Sharp Pixel-Perfect Edges** (ideal for pixel art, logos):
+```
+edge_blur_amount: 0.0
+binary_threshold: 220-250
+edge_refinement: 0.3-0.5
+scaling_method: NEAREST
+```
+
+**Natural Photo Edges** (portraits, objects):
+```
+edge_blur_amount: 0.8-1.5
+binary_threshold: 180-200
+edge_refinement: 0.7-0.9
+scaling_method: BILINEAR or BICUBIC
+```
+
+**Soft Composite Blending** (backgrounds, overlays):
+```
+edge_blur_amount: 2.0-5.0
+binary_threshold: 160-180
+edge_refinement: 0.8-1.0
+scaling_method: BICUBIC or LANCZOS
+```
+
+**Product Photography** (clean commercial look):
+```
+edge_blur_amount: 0.3-0.8
+binary_threshold: 200-230
+edge_refinement: 0.6-0.8
+object_class: "product"
+```
 
 ---
 
@@ -247,6 +287,52 @@ Use the **GrabCut Refinement** node to improve masks from other sources:
 4. **Edge Refinement**: Applies specialized, content-aware filters to preserve sharp pixel art lines or create smooth photo edges.
 5. **Alpha Generation**: Creates a soft mask with configurable thresholds.
 6. **Post-Processing**: Optional dither handling and final enhancements.
+
+### Edge Blur Processing
+The Auto GrabCut nodes include advanced edge blur functionality for creating soft mask transitions:
+
+#### Edge Blur Algorithm
+- **Gaussian Blur Implementation**: Uses OpenCV's GaussianBlur with dynamic kernel size calculation
+- **Kernel Size Formula**: `kernel_size = int(edge_blur_amount * 2) * 2 + 1` (ensures odd kernel size)
+- **Range Constraints**: Kernel size is clamped between 3 and 21 pixels for optimal performance (effective max blur ~10.0)
+- **Adaptive Processing**: blur_amount of 0.0 bypasses blur processing entirely for maximum performance
+
+#### When to Use Edge Blur vs Binary Threshold
+- **Edge Blur (edge_blur_amount > 0.0)**: Creates soft, feathered edges ideal for natural blending
+  - Best for: Composite images, smooth transitions, photographic subjects
+  - Processing: Applies Gaussian blur to 0-255 mask values, preserves anti-aliasing
+- **Binary Threshold (edge_blur_amount = 0.0)**: Creates sharp, pixel-perfect edges
+  - Best for: Pixel art, technical illustrations, crisp masking requirements
+  - Processing: Applies binary threshold to eliminate semi-transparency
+
+#### Performance Considerations
+- **Zero-Cost Bypass**: When `edge_blur_amount = 0.0`, blur processing is completely skipped
+- **Memory Usage**: Edge blur processing requires temporary 8-bit mask conversion
+- **Quality vs Speed**: Higher blur amounts (3.0+) provide smoother results but increase processing time
+
+### Auto-Parameter Adjustment
+When `auto_adjust` is enabled, the Auto GrabCut nodes intelligently analyze image characteristics and optimize parameters for best results:
+
+#### Edge Blur Auto-Adjustment
+The system automatically adjusts `edge_blur_amount` based on image analysis:
+
+- **High Edge Density Images** (detailed textures, complex patterns):
+  - Increases blur by +0.5 from base value (max 3.0)
+  - Helps smooth out noise and create cleaner masks
+
+- **Low Edge Density Images** (simple shapes, solid colors):
+  - Decreases blur by -0.5 from base value (min 0.0)
+  - Preserves sharp edges for clean geometric shapes
+
+- **High Noise Images** (photographs with grain, artifacts):
+  - Increases blur by +0.25 from base value
+  - Reduces mask noise while maintaining edge quality
+
+#### Auto-Adjustment Ranges
+- **edge_blur_amount**: Adjusted within 0.0-3.0 range (safer than manual 5.0 maximum)
+- **Analysis-Based**: Considers edge density, color variance, and noise characteristics
+- **Conservative Adjustments**: Small incremental changes preserve user intent while optimizing quality
+- **First Image Only**: In batch processing, analysis is performed on the first image and applied to all
 
 ---
 
@@ -272,6 +358,14 @@ Use the **GrabCut Refinement** node to improve masks from other sources:
 - Ensure `edge_detection_mode` is set correctly (`PIXEL_ART` for sharp edges, `PHOTOGRAPHIC` for smooth).
 - Enable `edge_refinement`.
 - Adjust `edge_sensitivity`.
+
+**Edge quality issues with Auto GrabCut nodes**
+- **Edges too sharp/harsh**: Increase `edge_blur_amount` to 0.5-2.0 for softer transitions
+- **Edges too soft/blurry**: Decrease `edge_blur_amount` to 0.0-0.5, or set to 0.0 for pixel-perfect edges
+- **Inconsistent edge quality**: Balance `edge_refinement` and `edge_blur_amount` - lower refinement when using higher blur amounts
+- **Poor composite blending**: Use `edge_blur_amount` 1.5-5.0 with `binary_threshold` 160-180 for seamless integration
+- **Pixel art corruption**: Set `edge_blur_amount` to 0.0 and use `scaling_method` NEAREST to preserve crisp pixels
+- **Processing too slow**: High `edge_blur_amount` values (>5.0) increase processing time - use lower values when possible
 
 ---
 

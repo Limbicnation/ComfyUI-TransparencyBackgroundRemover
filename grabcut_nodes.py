@@ -214,10 +214,10 @@ class AutoGrabCutRemover(ScalingMixin):
                 "edge_blur_amount": ("FLOAT", {
                     "default": 0.0,
                     "min": 0.0,
-                    "max": 5.0,
+                    "max": 10.0,
                     "step": 0.1,
                     "display": "slider",
-                    "tooltip": "Amount of Gaussian blur to apply to mask edges (0=none, 5=maximum)"
+                    "tooltip": "Amount of Gaussian blur to apply to mask edges (0=none, 10=maximum)"
                 }),
                 "binary_threshold": ("INT", {
                     "default": 200,
@@ -587,7 +587,7 @@ class GrabCutRefinement(ScalingMixin):
                 "edge_blur_amount": ("FLOAT", {
                     "default": 0.0,
                     "min": 0.0,
-                    "max": 5.0,
+                    "max": 10.0,
                     "step": 0.1,
                     "display": "slider",
                     "tooltip": "Amount of Gaussian blur to apply to mask edges (0=none, 5=maximum)"

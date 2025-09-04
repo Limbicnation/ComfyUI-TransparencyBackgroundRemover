@@ -288,6 +288,79 @@ def test_node_registration():
     print("\n" + "="*50)
 
 
+def test_bbox_validation_fixes():
+    """Test the new bounding box validation and safety margin functionality."""
+    print("\nTesting Bounding Box Validation Fixes...")
+    
+    try:
+        import torch
+        
+        # Create test tensor
+        test_img_np = create_test_image().astype(np.float32) / 255.0
+        test_tensor = torch.from_numpy(test_img_np).permute(2, 0, 1).unsqueeze(0)
+        print(f"Created test tensor for bbox testing: {test_tensor.shape}")
+        
+        # Create node
+        node = AutoGrabCutRemover()
+        print("✓ Created AutoGrabCutRemover node for bbox testing")
+        
+        # Test different bbox safety margins
+        safety_margins = [10, 30, 50, 80]
+        
+        for safety_margin in safety_margins:
+            print(f"\n--- Testing bbox_safety_margin = {safety_margin} ---")
+            
+            try:
+                output_image, output_mask, bbox_coords, confidence, metrics = node.remove_background(
+                    image=test_tensor,
+                    object_class="auto",
+                    confidence_threshold=0.5,
+                    grabcut_iterations=3,
+                    margin_pixels=10,
+                    edge_refinement=0.5,
+                    edge_blur_amount=0.0,
+                    bbox_safety_margin=safety_margin,
+                    min_bbox_size=64,
+                    fallback_margin_percent=0.20,
+                    binary_threshold=200,
+                    output_format="RGBA"
+                )
+                
+                print(f"✓ Processing successful with safety margin {safety_margin}")
+                print(f"  - Bounding box: {bbox_coords}")
+                print(f"  - Confidence: {confidence:.2f}")
+                    
+            except Exception as e:
+                print(f"✗ Error with safety margin {safety_margin}: {e}")
+        
+        # Test minimum bbox size functionality
+        print(f"\n--- Testing min_bbox_size functionality ---")
+        output_image, output_mask, bbox_coords, confidence, metrics = node.remove_background(
+            image=test_tensor,
+            object_class="auto",
+            confidence_threshold=0.5,
+            grabcut_iterations=3,
+            margin_pixels=10,
+            edge_refinement=0.5,
+            edge_blur_amount=0.0,
+            bbox_safety_margin=20,
+            min_bbox_size=128,  # Large minimum size
+            fallback_margin_percent=0.15,
+            binary_threshold=200,
+            output_format="RGBA"
+        )
+        
+        print("✓ Min bbox size test successful!")
+        print(f"  - Final bounding box: {bbox_coords}")
+        
+    except ImportError:
+        print("⚠ PyTorch not available, skipping bbox validation test")
+    except Exception as e:
+        print(f"✗ Error in bbox validation test: {e}")
+    
+    print("\n" + "="*50)
+
+
 def test_edge_blur_functionality():
     """Test the new edge blur functionality with various blur amounts."""
     print("\nTesting Edge Blur Functionality...")
@@ -305,7 +378,7 @@ def test_edge_blur_functionality():
         print("✓ Created AutoGrabCutRemover node for edge blur testing")
         
         # Test different edge blur amounts
-        blur_amounts = [0.0, 1.0, 2.5, 5.0]
+        blur_amounts = [0.0, 1.0, 2.5, 5.0, 8.0]
         
         for blur_amount in blur_amounts:
             print(f"\n--- Testing edge_blur_amount = {blur_amount} ---")
@@ -393,6 +466,7 @@ def main():
     test_grabcut_processor()
     test_initial_mask_refinement()
     test_comfyui_node()
+    test_bbox_validation_fixes()  # New test for bbox fixes
     test_edge_blur_functionality()
     test_node_registration()
     

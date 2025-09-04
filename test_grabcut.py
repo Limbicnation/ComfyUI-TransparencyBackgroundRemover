@@ -333,25 +333,50 @@ def test_bbox_validation_fixes():
             except Exception as e:
                 print(f"✗ Error with safety margin {safety_margin}: {e}")
         
-        # Test minimum bbox size functionality
+        # Test minimum bbox size functionality with small object simulation
         print(f"\n--- Testing min_bbox_size functionality ---")
-        output_image, output_mask, bbox_coords, confidence, metrics = node.remove_background(
-            image=test_tensor,
-            object_class="auto",
-            confidence_threshold=0.5,
-            grabcut_iterations=3,
-            margin_pixels=10,
-            edge_refinement=0.5,
-            edge_blur_amount=0.0,
-            bbox_safety_margin=20,
-            min_bbox_size=128,  # Large minimum size
-            fallback_margin_percent=0.15,
-            binary_threshold=200,
-            output_format="RGBA"
-        )
         
-        print("✓ Min bbox size test successful!")
-        print(f"  - Final bounding box: {bbox_coords}")
+        # Create a small test image with a tiny object to force min_bbox_size logic
+        small_test_image = torch.zeros((1, 200, 200, 3))  # Small 200x200 image
+        # Add a small white square in the center (20x20 pixels)
+        small_test_image[0, 90:110, 90:110, :] = 1.0
+        
+        for min_size in [64, 100, 150]:  # Test different minimum sizes
+            print(f"\n  Testing min_bbox_size={min_size} on 200x200 image with 20x20 object:")
+            try:
+                output_image, output_mask, bbox_coords, confidence, metrics = node.remove_background(
+                    image=small_test_image,
+                    object_class="auto",
+                    confidence_threshold=0.1,  # Low threshold to detect small object
+                    grabcut_iterations=1,
+                    margin_pixels=5,
+                    edge_refinement=0.5,
+                    edge_blur_amount=0.0,
+                    bbox_safety_margin=10,
+                    min_bbox_size=min_size,
+                    fallback_margin_percent=0.20,
+                    binary_threshold=200,
+                    output_format="RGBA"
+                )
+                
+                # Verify bbox meets minimum size requirement
+                if bbox_coords and len(bbox_coords) == 4:
+                    x1, y1, x2, y2 = bbox_coords
+                    actual_width = x2 - x1
+                    actual_height = y2 - y1
+                    
+                    width_ok = actual_width >= min_size or actual_width >= 200  # Unless image is smaller
+                    height_ok = actual_height >= min_size or actual_height >= 200
+                    
+                    if width_ok and height_ok:
+                        print(f"    ✓ Bbox size enforced: {actual_width}x{actual_height} >= {min_size}")
+                    else:
+                        print(f"    ✗ Bbox size not enforced: {actual_width}x{actual_height} < {min_size}")
+                else:
+                    print(f"    ⚠ No valid bbox detected, using fallback")
+                    
+            except Exception as e:
+                print(f"    ✗ Error with min_bbox_size {min_size}: {e}")
         
     except ImportError:
         print("⚠ PyTorch not available, skipping bbox validation test")

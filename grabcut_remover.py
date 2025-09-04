@@ -49,6 +49,12 @@ _BINARY_THRESHOLD_ADJUSTMENT = 30   # Amount to adjust binary threshold for dark
 _BINARY_THRESHOLD_BRIGHT_ADJUSTMENT = 20  # Amount to adjust for bright images
 _EDGE_BLUR_ADJUSTMENT = 0.5         # Amount to adjust edge blur for different conditions
 
+# Edge Blur Processing Constants
+_SHARP_EDGE_BLUR_THRESHOLD = 0.5    # Threshold below which binary threshold is applied
+_KERNEL_SIZE_SCALAR = 4             # Multiplier for blur amount to kernel size conversion
+_MAX_KERNEL_SIZE = 31               # Maximum kernel size for performance
+_SIGMA_SCALAR = 0.5                 # Multiplier for blur amount to sigma conversion
+
 # Parameter Limits
 _CONFIDENCE_MIN = 0.3        # Minimum confidence threshold
 _CONFIDENCE_MAX = 0.8        # Maximum confidence threshold
@@ -200,15 +206,25 @@ class GrabCutProcessor:
         # Ensure minimum size
         if bbox_w < self.min_bbox_size:
             center_x = (x1 + x2) // 2
-            half_min_w = self.min_bbox_size // 2
-            x1 = max(0, center_x - half_min_w)
-            x2 = min(w, center_x + half_min_w)
-            
+            x1 = center_x - self.min_bbox_size // 2
+            x2 = x1 + self.min_bbox_size
+            if x2 > w:
+                x2 = w
+                x1 = max(0, w - self.min_bbox_size)
+            elif x1 < 0:
+                x1 = 0
+                x2 = min(w, self.min_bbox_size)
+                
         if bbox_h < self.min_bbox_size:
             center_y = (y1 + y2) // 2
-            half_min_h = self.min_bbox_size // 2
-            y1 = max(0, center_y - half_min_h)
-            y2 = min(h, center_y + half_min_h)
+            y1 = center_y - self.min_bbox_size // 2
+            y2 = y1 + self.min_bbox_size
+            if y2 > h:
+                y2 = h
+                y1 = max(0, h - self.min_bbox_size)
+            elif y1 < 0:
+                y1 = 0
+                y2 = min(h, self.min_bbox_size)
         
         # Add safety margin
         x1 = max(0, x1 - self.bbox_safety_margin)
@@ -393,7 +409,7 @@ class GrabCutProcessor:
             refined = blurred.astype(np.float32) / 255.0
         
         # Step 5: Apply binary threshold as final step (only if no blur or minimal blur)
-        if self.edge_blur_amount <= 0.5:
+        if self.edge_blur_amount <= _SHARP_EDGE_BLUR_THRESHOLD:
             # Apply binary threshold to eliminate semi-transparency for sharp edges
             _, binary = cv2.threshold(refined, self.binary_threshold / 255.0, 1.0, cv2.THRESH_BINARY)
             return (binary * 255).astype(np.uint8)
@@ -416,14 +432,14 @@ class GrabCutProcessor:
         
         # Calculate dynamic kernel size based on blur amount
         # Ensure kernel size is odd and reasonable
-        kernel_size = max(3, int(self.edge_blur_amount * 4) | 1)  # Force odd using bitwise OR
-        # With edge_blur_amount max 10.0, kernel_size max is 41, cap at 31 for performance
-        kernel_size = min(kernel_size, 31)
+        kernel_size = max(3, int(self.edge_blur_amount * _KERNEL_SIZE_SCALAR) | 1)  # Force odd using bitwise OR
+        # With edge_blur_amount max 10.0, kernel_size max is 41, cap for performance
+        kernel_size = min(kernel_size, _MAX_KERNEL_SIZE)
         
         # Calculate sigma based on blur amount for consistent results
         # Using standard relationship: sigma = 0.3 * ((ksize-1) * 0.5 - 1) + 0.8
-        # But simplified for direct control: sigma = blur_amount * 0.5
-        sigma = self.edge_blur_amount * 0.5
+        # But simplified for direct control: sigma = blur_amount * scalar
+        sigma = self.edge_blur_amount * _SIGMA_SCALAR
         
         # Apply Gaussian blur with calculated sigma
         blurred_mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), sigma)

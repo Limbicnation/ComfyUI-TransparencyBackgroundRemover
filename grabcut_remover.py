@@ -47,6 +47,7 @@ _MARGIN_ADJUSTMENT = 5              # Amount to adjust margin pixels
 _REFINEMENT_ADJUSTMENT = 0.2        # Amount to adjust edge refinement strength
 _BINARY_THRESHOLD_ADJUSTMENT = 30   # Amount to adjust binary threshold for dark images
 _BINARY_THRESHOLD_BRIGHT_ADJUSTMENT = 20  # Amount to adjust for bright images
+_EDGE_BLUR_ADJUSTMENT = 0.5         # Amount to adjust edge blur for different conditions
 
 # Parameter Limits
 _CONFIDENCE_MIN = 0.3        # Minimum confidence threshold
@@ -59,6 +60,8 @@ _REFINEMENT_MIN = 0.4       # Minimum edge refinement strength
 _REFINEMENT_MAX = 0.9       # Maximum edge refinement strength
 _BINARY_THRESHOLD_MIN = 150  # Minimum binary threshold
 _BINARY_THRESHOLD_MAX = 240  # Maximum binary threshold
+_EDGE_BLUR_MIN = 0.0        # Minimum edge blur amount
+_EDGE_BLUR_MAX = 3.0        # Maximum edge blur amount
 
 
 class GrabCutProcessor:
@@ -73,6 +76,7 @@ class GrabCutProcessor:
                  iterations: int = 5,
                  margin_pixels: int = 20,
                  edge_refinement_strength: float = 0.7,
+                 edge_blur_amount: float = 0.0,
                  binary_threshold: int = 200,
                  model_path: Optional[str] = None):
         """
@@ -83,6 +87,7 @@ class GrabCutProcessor:
             iterations: Number of GrabCut iterations
             margin_pixels: Pixel margin around detected object
             edge_refinement_strength: Strength of edge refinement (0.0-1.0)
+            edge_blur_amount: Amount of Gaussian blur to apply to mask edges (0.0-5.0)
             binary_threshold: Threshold for binary mask conversion
             model_path: Optional custom YOLO model path
         """
@@ -90,6 +95,7 @@ class GrabCutProcessor:
         self.iterations = iterations
         self.margin_pixels = margin_pixels
         self.edge_refinement_strength = edge_refinement_strength
+        self.edge_blur_amount = edge_blur_amount
         self.binary_threshold = binary_threshold
         
         # Initialize YOLO model
@@ -310,10 +316,38 @@ class GrabCutProcessor:
         refined = cv2.morphologyEx(refined, cv2.MORPH_CLOSE, kernel)
         refined = cv2.morphologyEx(refined, cv2.MORPH_OPEN, kernel)
         
-        # Apply binary threshold to eliminate semi-transparency
-        _, binary = cv2.threshold(refined, self.binary_threshold / 255.0, 1.0, cv2.THRESH_BINARY)
+        if self.edge_blur_amount > 0:
+            # Convert to 0-255 range for edge blur processing, apply blur, and return.
+            refined_255 = (refined * 255).astype(np.uint8)
+            return self._apply_edge_blur(refined_255)
+        else:
+            # Apply binary threshold to eliminate semi-transparency for sharp edges.
+            _, binary = cv2.threshold(refined, self.binary_threshold / 255.0, 1.0, cv2.THRESH_BINARY)
+            return (binary * 255).astype(np.uint8)
+    
+    def _apply_edge_blur(self, mask: np.ndarray) -> np.ndarray:
+        """
+        Apply Gaussian blur to mask edges for softer transitions.
         
-        return (binary * 255).astype(np.uint8)
+        Args:
+            mask: Binary mask to blur
+            
+        Returns:
+            Blurred mask with soft edges
+        """
+        if self.edge_blur_amount <= 0:
+            return mask
+        
+        # Calculate dynamic kernel size based on blur amount
+        # Ensure kernel size is odd and reasonable
+        kernel_size = int(self.edge_blur_amount * 2) * 2 + 1
+        # With edge_blur_amount max 5.0, kernel_size max is 21.
+        kernel_size = max(3, min(kernel_size, 21))
+        
+        # Apply Gaussian blur. Let OpenCV calculate sigma from the kernel size for a standard blur.
+        blurred_mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
+        
+        return blurred_mask
     
     def auto_adjust_parameters(self, image: np.ndarray) -> dict:
         """
@@ -395,6 +429,18 @@ class GrabCutProcessor:
         elif brightness > _BRIGHTNESS_BRIGHT:
             # Bright image -> higher threshold
             adjustments['binary_threshold'] = min(_BINARY_THRESHOLD_MAX, base_threshold + _BINARY_THRESHOLD_BRIGHT_ADJUSTMENT)
+        
+        # Adjust edge_blur_amount based on edge characteristics and noise level
+        base_blur = self.edge_blur_amount
+        if laplacian_var > _LAPLACIAN_HIGH_NOISE or edge_density < _EDGE_DENSITY_SOFT:
+            # Noisy or soft edges -> apply blur to smooth transitions
+            adjustments['edge_blur_amount'] = min(_EDGE_BLUR_MAX, base_blur + _EDGE_BLUR_ADJUSTMENT)
+        elif edge_density > _EDGE_DENSITY_SHARP and laplacian_var > _LAPLACIAN_SHARP_EDGES:
+            # Sharp, clean edges -> minimal blur to preserve detail
+            adjustments['edge_blur_amount'] = max(_EDGE_BLUR_MIN, base_blur - _EDGE_BLUR_ADJUSTMENT)
+        elif contrast < _CONTRAST_LOW:
+            # Low contrast images benefit from edge blur for smoother results
+            adjustments['edge_blur_amount'] = min(_EDGE_BLUR_MAX, base_blur + (_EDGE_BLUR_ADJUSTMENT * 0.5))
         
         return adjustments
     

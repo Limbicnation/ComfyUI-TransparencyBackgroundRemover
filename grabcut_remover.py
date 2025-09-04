@@ -49,6 +49,12 @@ _BINARY_THRESHOLD_ADJUSTMENT = 30   # Amount to adjust binary threshold for dark
 _BINARY_THRESHOLD_BRIGHT_ADJUSTMENT = 20  # Amount to adjust for bright images
 _EDGE_BLUR_ADJUSTMENT = 0.5         # Amount to adjust edge blur for different conditions
 
+# Edge Blur Processing Constants
+_SHARP_EDGE_BLUR_THRESHOLD = 0.5    # Threshold below which binary threshold is applied
+_KERNEL_SIZE_SCALAR = 4             # Multiplier for blur amount to kernel size conversion
+_MAX_KERNEL_SIZE = 31               # Maximum kernel size for performance
+_SIGMA_SCALAR = 0.5                 # Multiplier for blur amount to sigma conversion
+
 # Parameter Limits
 _CONFIDENCE_MIN = 0.3        # Minimum confidence threshold
 _CONFIDENCE_MAX = 0.8        # Maximum confidence threshold
@@ -78,7 +84,10 @@ class GrabCutProcessor:
                  edge_refinement_strength: float = 0.7,
                  edge_blur_amount: float = 0.0,
                  binary_threshold: int = 200,
-                 model_path: Optional[str] = None):
+                 model_path: Optional[str] = None,
+                 bbox_safety_margin: int = 30,
+                 min_bbox_size: int = 64,
+                 fallback_margin_percent: float = 0.2):
         """
         Initialize GrabCut processor with configuration.
         
@@ -87,9 +96,12 @@ class GrabCutProcessor:
             iterations: Number of GrabCut iterations
             margin_pixels: Pixel margin around detected object
             edge_refinement_strength: Strength of edge refinement (0.0-1.0)
-            edge_blur_amount: Amount of Gaussian blur to apply to mask edges (0.0-5.0)
+            edge_blur_amount: Amount of Gaussian blur to apply to mask edges (0.0-10.0)
             binary_threshold: Threshold for binary mask conversion
             model_path: Optional custom YOLO model path
+            bbox_safety_margin: Extra pixels beyond detected bbox for safety
+            min_bbox_size: Minimum bbox dimensions to prevent over-cropping
+            fallback_margin_percent: Margin percentage for fallback bbox (0.0-0.5)
         """
         self.confidence_threshold = confidence_threshold
         self.iterations = iterations
@@ -97,6 +109,9 @@ class GrabCutProcessor:
         self.edge_refinement_strength = edge_refinement_strength
         self.edge_blur_amount = edge_blur_amount
         self.binary_threshold = binary_threshold
+        self.bbox_safety_margin = bbox_safety_margin
+        self.min_bbox_size = min_bbox_size
+        self.fallback_margin_percent = max(0.1, min(0.5, fallback_margin_percent))
         
         # Initialize YOLO model
         self.yolo_model = None
@@ -166,6 +181,70 @@ class GrabCutProcessor:
             print("Falling back to manual rectangle mode")
             self.yolo_model = None
     
+    def _validate_and_fix_bbox(self, bbox: Tuple[int, int, int, int], image_shape: Tuple[int, int]) -> Tuple[int, int, int, int]:
+        """
+        Validate and fix bounding box to prevent cropping and ensure minimum size.
+        
+        Args:
+            bbox: Original bounding box (x1, y1, x2, y2)
+            image_shape: Image shape (height, width)
+            
+        Returns:
+            Corrected bounding box (x1, y1, x2, y2)
+        """
+        h, w = image_shape
+        x1, y1, x2, y2 = bbox
+        
+        # Ensure coordinates are in correct order
+        x1, x2 = min(x1, x2), max(x1, x2)
+        y1, y2 = min(y1, y2), max(y1, y2)
+        
+        # Calculate current dimensions
+        bbox_w = x2 - x1
+        bbox_h = y2 - y1
+        
+        # Ensure minimum size
+        if bbox_w < self.min_bbox_size:
+            center_x = (x1 + x2) // 2
+            x1 = center_x - self.min_bbox_size // 2
+            x2 = x1 + self.min_bbox_size
+            if x2 > w:
+                x2 = w
+                x1 = max(0, w - self.min_bbox_size)
+            elif x1 < 0:
+                x1 = 0
+                x2 = min(w, self.min_bbox_size)
+                
+        if bbox_h < self.min_bbox_size:
+            center_y = (y1 + y2) // 2
+            y1 = center_y - self.min_bbox_size // 2
+            y2 = y1 + self.min_bbox_size
+            if y2 > h:
+                y2 = h
+                y1 = max(0, h - self.min_bbox_size)
+            elif y1 < 0:
+                y1 = 0
+                y2 = min(h, self.min_bbox_size)
+        
+        # Add safety margin
+        x1 = max(0, x1 - self.bbox_safety_margin)
+        y1 = max(0, y1 - self.bbox_safety_margin)
+        x2 = min(w, x2 + self.bbox_safety_margin)
+        y2 = min(h, y2 + self.bbox_safety_margin)
+        
+        # Final bounds check
+        x1, x2 = max(0, x1), min(w, x2)
+        y1, y2 = max(0, y1), min(h, y2)
+        
+        # Ensure we still have a valid bbox
+        if x2 <= x1 or y2 <= y1:
+            # Fall back to center area if bbox is invalid
+            margin = int(min(h, w) * self.fallback_margin_percent)
+            x1, y1 = margin, margin
+            x2, y2 = w - margin, h - margin
+        
+        return (x1, y1, x2, y2)
+    
     def detect_object(self, image: np.ndarray, target_class: Optional[str] = None) -> Optional[Tuple[int, int, int, int, float]]:
         """
         Detect primary object in image using YOLO.
@@ -233,9 +312,11 @@ class GrabCutProcessor:
             Binary mask (0=background, 255=foreground)
         """
         h, w = image.shape[:2]
-        x1, y1, x2, y2 = bbox
         
-        # Add margin to bounding box
+        # Validate and fix bounding box
+        x1, y1, x2, y2 = self._validate_and_fix_bbox(bbox, (h, w))
+        
+        # Add additional margin for GrabCut processing
         x1 = max(0, x1 - self.margin_pixels)
         y1 = max(0, y1 - self.margin_pixels)
         x2 = min(w, x2 + self.margin_pixels)
@@ -271,7 +352,7 @@ class GrabCutProcessor:
     
     def refine_edges(self, mask: np.ndarray, image: np.ndarray) -> np.ndarray:
         """
-        Apply edge refinement to improve mask quality.
+        Apply edge refinement to improve mask quality with artifact-free edge blur.
         
         Args:
             mask: Binary mask
@@ -280,50 +361,61 @@ class GrabCutProcessor:
         Returns:
             Refined mask
         """
-        if self.edge_refinement_strength <= 0:
+        if self.edge_refinement_strength <= 0 and self.edge_blur_amount <= 0:
             return mask
         
         # Convert to float for processing
         mask_float = mask.astype(np.float32) / 255.0
         
-        # Apply bilateral filter for edge-preserving smoothing
-        refined = cv2.bilateralFilter(
-            mask_float,
-            d=9,
-            sigmaColor=0.1,
-            sigmaSpace=7
-        )
-        
-        # Apply guided filter using original image
-        try:
-            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-            # Ensure proper data types for guided filter
-            gray = gray.astype(np.float32)
-            refined_input = refined.astype(np.float32)
-            
-            refined = cv2.ximgproc.guidedFilter(
-                guide=gray,
-                src=refined_input,
-                radius=4,
-                eps=self.edge_refinement_strength * 0.01
+        # Step 1: Apply bilateral filter for edge-preserving smoothing
+        if self.edge_refinement_strength > 0:
+            refined = cv2.bilateralFilter(
+                mask_float,
+                d=9,
+                sigmaColor=0.1,
+                sigmaSpace=7
             )
-        except Exception as e:
-            print(f"Guided filter failed, using bilateral filter only: {e}")
-            # Continue with just the bilateral filter result
-        
-        # Morphological operations to clean up
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        refined = cv2.morphologyEx(refined, cv2.MORPH_CLOSE, kernel)
-        refined = cv2.morphologyEx(refined, cv2.MORPH_OPEN, kernel)
-        
-        if self.edge_blur_amount > 0:
-            # Convert to 0-255 range for edge blur processing, apply blur, and return.
-            refined_255 = (refined * 255).astype(np.uint8)
-            return self._apply_edge_blur(refined_255)
+            
+            # Step 2: Apply guided filter using original image
+            try:
+                gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                # Ensure proper data types for guided filter
+                gray = gray.astype(np.float32)
+                refined_input = refined.astype(np.float32)
+                
+                refined = cv2.ximgproc.guidedFilter(
+                    guide=gray,
+                    src=refined_input,
+                    radius=4,
+                    eps=self.edge_refinement_strength * 0.01
+                )
+            except Exception as e:
+                print(f"Guided filter failed, using bilateral filter only: {e}")
+                # Continue with just the bilateral filter result
+            
+            # Step 3: Morphological operations to clean up
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            refined = cv2.morphologyEx(refined, cv2.MORPH_CLOSE, kernel)
+            refined = cv2.morphologyEx(refined, cv2.MORPH_OPEN, kernel)
         else:
-            # Apply binary threshold to eliminate semi-transparency for sharp edges.
+            refined = mask_float
+        
+        # Step 4: Apply edge blur BEFORE binary thresholding to prevent artifacts
+        if self.edge_blur_amount > 0:
+            # Convert to 0-255 range for edge blur processing
+            refined_255 = (refined * 255).astype(np.uint8)
+            blurred = self._apply_edge_blur(refined_255)
+            # Convert back to float for final processing
+            refined = blurred.astype(np.float32) / 255.0
+        
+        # Step 5: Apply binary threshold as final step (only if no blur or minimal blur)
+        if self.edge_blur_amount <= _SHARP_EDGE_BLUR_THRESHOLD:
+            # Apply binary threshold to eliminate semi-transparency for sharp edges
             _, binary = cv2.threshold(refined, self.binary_threshold / 255.0, 1.0, cv2.THRESH_BINARY)
             return (binary * 255).astype(np.uint8)
+        else:
+            # Keep soft edges when significant blur is applied
+            return (refined * 255).astype(np.uint8)
     
     def _apply_edge_blur(self, mask: np.ndarray) -> np.ndarray:
         """
@@ -340,12 +432,17 @@ class GrabCutProcessor:
         
         # Calculate dynamic kernel size based on blur amount
         # Ensure kernel size is odd and reasonable
-        kernel_size = int(self.edge_blur_amount * 2) * 2 + 1
-        # With edge_blur_amount max 5.0, kernel_size max is 21.
-        kernel_size = max(3, min(kernel_size, 21))
+        kernel_size = max(3, int(self.edge_blur_amount * _KERNEL_SIZE_SCALAR) | 1)  # Force odd using bitwise OR
+        # With edge_blur_amount max 10.0, kernel_size max is 41, cap for performance
+        kernel_size = min(kernel_size, _MAX_KERNEL_SIZE)
         
-        # Apply Gaussian blur. Let OpenCV calculate sigma from the kernel size for a standard blur.
-        blurred_mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
+        # Calculate sigma based on blur amount for consistent results
+        # Using standard relationship: sigma = 0.3 * ((ksize-1) * 0.5 - 1) + 0.8
+        # But simplified for direct control: sigma = blur_amount * scalar
+        sigma = self.edge_blur_amount * _SIGMA_SCALAR
+        
+        # Apply Gaussian blur with calculated sigma
+        blurred_mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), sigma)
         
         return blurred_mask
     
@@ -551,10 +648,10 @@ class GrabCutProcessor:
         detection = self.detect_object(image, target_class)
         
         if detection is None:
-            # Fallback: use entire image with margin
-            margin = int(min(h, w) * 0.1)
+            # Fallback: use entire image with adaptive margin
+            margin = int(min(h, w) * self.fallback_margin_percent)
             detection = (margin, margin, w - margin, h - margin, 0.5)
-            print("No object detected, using fallback rectangle")
+            print(f"No object detected, using fallback rectangle with {self.fallback_margin_percent*100}% margin")
         
         x1, y1, x2, y2, confidence = detection
         result['bbox'] = (x1, y1, x2, y2)
@@ -621,12 +718,16 @@ class GrabCutProcessor:
             # Find bounding box from initial mask
             if initial_mask.max() > 0:
                 coords = np.where(initial_mask > 127)
+                # Correct axis ordering: coords[0] is y (rows), coords[1] is x (columns)
                 y1, y2 = coords[0].min(), coords[0].max()
                 x1, x2 = coords[1].min(), coords[1].max()
+                # Validate the extracted bbox
+                raw_bbox = (x1, y1, x2, y2)
+                x1, y1, x2, y2 = self._validate_and_fix_bbox(raw_bbox, (h, w))
                 detection = (x1, y1, x2, y2, 0.8)
             else:
-                # Fallback to full image
-                margin = int(min(h, w) * 0.1)
+                # Fallback to adaptive margin
+                margin = int(min(h, w) * self.fallback_margin_percent)
                 detection = (margin, margin, w - margin, h - margin, 0.5)
         
         x1, y1, x2, y2, confidence = detection
@@ -703,8 +804,8 @@ def create_fallback_processor():
             contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             if not contours:
-                # Return center region
-                margin = int(min(h, w) * 0.2)
+                # Return center region with adaptive margin
+                margin = int(min(h, w) * self.fallback_margin_percent)
                 return (margin, margin, w - margin, h - margin, 0.5)
             
             # Find largest contour

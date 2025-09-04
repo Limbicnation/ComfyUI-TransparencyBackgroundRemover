@@ -219,6 +219,28 @@ class AutoGrabCutRemover(ScalingMixin):
                     "display": "slider",
                     "tooltip": "Amount of Gaussian blur to apply to mask edges (0=none, 10=maximum)"
                 }),
+                "bbox_safety_margin": ("INT", {
+                    "default": 30,
+                    "min": 0,
+                    "max": 100,
+                    "step": 5,
+                    "tooltip": "Extra pixels beyond detected bounding box for safety"
+                }),
+                "min_bbox_size": ("INT", {
+                    "default": 64,
+                    "min": 32,
+                    "max": 256,
+                    "step": 16,
+                    "tooltip": "Minimum bounding box dimensions to prevent over-cropping"
+                }),
+                "fallback_margin_percent": ("FLOAT", {
+                    "default": 0.20,
+                    "min": 0.10,
+                    "max": 0.50,
+                    "step": 0.05,
+                    "display": "slider",
+                    "tooltip": "Margin percentage for fallback bbox when no object detected"
+                }),
                 "binary_threshold": ("INT", {
                     "default": 200,
                     "min": 128,
@@ -306,6 +328,9 @@ class AutoGrabCutRemover(ScalingMixin):
                          margin_pixels: int = 20,
                          edge_refinement: float = 0.7,
                          edge_blur_amount: float = 0.0,
+                         bbox_safety_margin: int = 30,
+                         min_bbox_size: int = 64,
+                         fallback_margin_percent: float = 0.20,
                          binary_threshold: int = 200,
                          output_size: str = "ORIGINAL",
                          scaling_method: str = "NEAREST",
@@ -341,6 +366,9 @@ class AutoGrabCutRemover(ScalingMixin):
         self.processor.margin_pixels = margin_pixels
         self.processor.edge_refinement_strength = edge_refinement
         self.processor.edge_blur_amount = edge_blur_amount
+        self.processor.bbox_safety_margin = bbox_safety_margin
+        self.processor.min_bbox_size = min_bbox_size
+        self.processor.fallback_margin_percent = fallback_margin_percent
         self.processor.binary_threshold = binary_threshold
         
         # Apply edge detection mode optimizations
@@ -590,14 +618,28 @@ class GrabCutRefinement(ScalingMixin):
                     "max": 10.0,
                     "step": 0.1,
                     "display": "slider",
-                    "tooltip": "Amount of Gaussian blur to apply to mask edges (0=none, 5=maximum)"
+                    "tooltip": "Amount of Gaussian blur to apply to mask edges (0=none, 10=maximum)"
                 }),
                 "expand_margin": ("INT", {
                     "default": 10,
                     "min": 0,
-                    "max": 30,
+                    "max": 50,
                     "step": 5,
-                    "tooltip": "Pixels to expand mask boundary"
+                    "tooltip": "Pixels to expand mask boundary for refinement"
+                }),
+                "bbox_safety_margin": ("INT", {
+                    "default": 20,
+                    "min": 0,
+                    "max": 100,
+                    "step": 5,
+                    "tooltip": "Extra pixels beyond detected bounding box for safety"
+                }),
+                "min_bbox_size": ("INT", {
+                    "default": 64,
+                    "min": 32,
+                    "max": 256,
+                    "step": 16,
+                    "tooltip": "Minimum bounding box dimensions to prevent over-cropping"
                 }),
                 "output_size": (["ORIGINAL", "512x512", "1024x1024", "2048x2048", "custom"], {
                     "default": "ORIGINAL",
@@ -648,6 +690,8 @@ class GrabCutRefinement(ScalingMixin):
                    edge_refinement: float = 0.5,
                    edge_blur_amount: float = 0.0,
                    expand_margin: int = 10,
+                   bbox_safety_margin: int = 20,
+                   min_bbox_size: int = 64,
                    output_size: str = "ORIGINAL",
                    scaling_method: str = "NEAREST",
                    custom_width: int = 512,
@@ -673,6 +717,10 @@ class GrabCutRefinement(ScalingMixin):
         self.processor.edge_refinement_strength = edge_refinement
         self.processor.edge_blur_amount = edge_blur_amount
         self.processor.margin_pixels = expand_margin
+        self.processor.bbox_safety_margin = bbox_safety_margin
+        self.processor.min_bbox_size = min_bbox_size
+        # Use default fallback margin for refinement
+        self.processor.fallback_margin_percent = 0.15
         
         # Handle batch
         if len(image.shape) == 4:

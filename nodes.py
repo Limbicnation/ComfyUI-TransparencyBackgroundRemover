@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from PIL import Image
 import cv2
-from sklearn.cluster import KMeans
 import colorsys
 
 # Handle ComfyUI imports gracefully for testing

@@ -1,8 +1,15 @@
 import numpy as np
 import cv2
-from sklearn.cluster import KMeans
 import colorsys
 from typing import Tuple, Optional, List
+
+# Lazy import sklearn with graceful fallback
+try:
+    from sklearn.cluster import KMeans
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    KMeans = None
 
 
 class EnhancedPixelArtProcessor:
@@ -34,6 +41,12 @@ class EnhancedPixelArtProcessor:
         self.edge_refinement = edge_refinement
         self.dither_handling = dither_handling
         self.binary_threshold = binary_threshold
+
+        # Warn if sklearn is not available and color clustering is requested
+        if not SKLEARN_AVAILABLE and self.color_clusters > 0:
+            print("⚠️  Warning: scikit-learn not installed. Color clustering detection disabled.")
+            print("   For best results, install dependencies: pip install scikit-learn")
+            print("   Or run install.bat (Windows) / install.sh (Linux/Mac) in the custom node directory.")
         
     def remove_background_advanced(self, image: np.ndarray) -> np.ndarray:
         """
@@ -75,9 +88,12 @@ class EnhancedPixelArtProcessor:
         masks.append(edge_mask)
         
         # Method 2: Color clustering (skip for very large images to save time)
-        if max_dimension <= 1536:  # Only use clustering for reasonably sized images
+        if max_dimension <= 1536 and SKLEARN_AVAILABLE:  # Only use clustering for reasonably sized images
             cluster_mask = self._color_clustering_detection(processed_image)
             masks.append(cluster_mask)
+        elif max_dimension <= 1536 and not SKLEARN_AVAILABLE:
+            # Info message only shown once per session (first time processor is created)
+            pass  # Already warned in __init__
         
         # Method 3: Corner sampling
         corner_mask = self._corner_sampling_detection(processed_image)
@@ -374,8 +390,13 @@ class EnhancedPixelArtProcessor:
     
     def _color_clustering_detection(self, image: np.ndarray) -> np.ndarray:
         """Detect background using K-means color clustering with performance optimizations."""
+        # Return neutral mask if sklearn is not available
+        if not SKLEARN_AVAILABLE:
+            h, w = image.shape[:2]
+            return np.zeros((h, w), dtype=np.uint8)
+
         h, w = image.shape[:2]
-        
+
         # Performance optimization: Sample pixels for very large images
         if h * w > 500000:  # For images larger than ~500k pixels
             # Sample every 4th pixel in both dimensions

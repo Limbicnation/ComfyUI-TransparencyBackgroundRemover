@@ -136,7 +136,6 @@ class TestGrabCutNodeParamsCombined:
         p = GrabCutNodeParams(
             iterations=5,
             margin=20,
-            edge_threshold=0.5,
             confidence_threshold=0.5,
             target_long_edge=1024,
             maintain_aspect=True,

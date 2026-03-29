@@ -14,10 +14,6 @@ class GrabCutParams(BaseModel):
 
     iterations: int = Field(default=5, ge=1, le=100, description="GrabCut iterations (1-100)")
     margin: int = Field(default=20, ge=0, le=500, description="Margin around detected object in pixels")
-    edge_threshold: float = Field(
-        default=0.5, ge=0.0, le=1.0,
-        description="Edge detection threshold for auto-adjustment"
-    )
     confidence_threshold: float = Field(
         default=0.5, ge=0.0, le=1.0,
         description="YOLO confidence threshold"

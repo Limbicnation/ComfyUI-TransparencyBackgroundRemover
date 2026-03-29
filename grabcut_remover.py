@@ -486,7 +486,8 @@ class GrabCutProcessor:
         fft = np.fft.fft2(gray)
         fft_magnitude = np.abs(fft)
         fft_magnitude[0:5, 0:5] = 0
-        peak_ratio = np.max(fft_magnitude) / np.mean(fft_magnitude)
+        mean_mag = np.mean(fft_magnitude)
+        peak_ratio = np.max(fft_magnitude) / mean_mag if mean_mag > 0 else 0.0
 
         is_small = w <= 512 or h <= 512
 

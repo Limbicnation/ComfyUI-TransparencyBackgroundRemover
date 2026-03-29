@@ -34,7 +34,9 @@ if _parent not in _sys.path:
 try:
     from src.validation import validate_node_params, GrabCutParams, MaskParams
 except ImportError:
-    # Graceful degradation — log and continue without validation
+    # Graceful degradation — warn and continue without validation
+    log.warning("grabcut_node.validation_unavailable",
+                hint="pydantic not installed — parameter validation disabled")
     validate_node_params = GrabCutParams = MaskParams = None
 
 
@@ -514,20 +516,33 @@ class AutoGrabCutRemover(ScalingMixin):
                 # Convert from ComfyUI tensor format to numpy
                 img_tensor = image[i]
 
-                # Validate input tensor
+                # Validate input tensor — append fallback on failure to keep
+                # batch alignment with bbox_metadata and avoid empty torch.stack
                 if len(img_tensor.shape) != 3:
                     log.warning("grabcut_node.unexpected_shape", shape=list(img_tensor.shape))
+                    h, w = image[i].shape[-3] if len(image[i].shape) >= 3 else 512, image[i].shape[-2] if len(image[i].shape) >= 2 else 512
+                    processed_images.append(torch.zeros((h, w, 4 if output_format == "RGBA" else 1), dtype=torch.float32))
+                    masks.append(torch.zeros((h, w), dtype=torch.float32))
+                    all_bboxes.append("(0,0,0,0)")
+                    all_confidences.append(0.0)
+                    all_metrics.append(f"Batch {i+1}/{batch_size}: Invalid tensor shape")
                     continue
 
                 img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
-                
+
                 # Ensure channels last format (H, W, C)
                 if img_np.shape[0] == 3 or img_np.shape[0] == 4:
                     img_np = np.transpose(img_np, (1, 2, 0))
-                
+
                 # Final validation
                 if len(img_np.shape) != 3 or img_np.shape[2] not in [3, 4]:
                     log.warning("grabcut_node.invalid_shape", shape=list(img_np.shape))
+                    h, w = img_np.shape[0], img_np.shape[1] if len(img_np.shape) >= 2 else 512
+                    processed_images.append(torch.zeros((h, w, 4 if output_format == "RGBA" else 1), dtype=torch.float32))
+                    masks.append(torch.zeros((h, w), dtype=torch.float32))
+                    all_bboxes.append("(0,0,0,0)")
+                    all_confidences.append(0.0)
+                    all_metrics.append(f"Batch {i+1}/{batch_size}: Invalid image shape")
                     continue
                     
                 # Convert to RGB if needed
@@ -628,9 +643,10 @@ class AutoGrabCutRemover(ScalingMixin):
                     
             except Exception as e:
                 log.error("grabcut_node.batch_error", item=i, error=str(e))
-                h, w = 512, 512
-                if len(processed_images) > 0:
-                    h, w = processed_images[0].shape[:2]
+                # Derive h,w from original input tensor to avoid shape mismatch
+                img_shape = image[i].shape
+                h = img_shape[-3] if len(img_shape) >= 3 else 512
+                w = img_shape[-2] if len(img_shape) >= 2 else 512
 
                 if output_format == "RGBA":
                     rgb_tensor = torch.zeros((h, w, 4), dtype=torch.float32)
@@ -838,6 +854,9 @@ class GrabCutRefinement(ScalingMixin):
         else:
             batch_size = 1
             image = image.unsqueeze(0)
+
+        # Ensure mask has batch dimension regardless of image path
+        if len(mask.shape) == 2:
             mask = mask.unsqueeze(0)
 
         refined_images = []

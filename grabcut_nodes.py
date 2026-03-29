@@ -520,7 +520,9 @@ class AutoGrabCutRemover(ScalingMixin):
                 # batch alignment with bbox_metadata and avoid empty torch.stack
                 if len(img_tensor.shape) != 3:
                     log.warning("grabcut_node.unexpected_shape", shape=list(img_tensor.shape))
-                    h, w = image[i].shape[-3] if len(image[i].shape) >= 3 else 512, image[i].shape[-2] if len(image[i].shape) >= 2 else 512
+                    # image[i] from a 4D tensor is always 3D — direct index is safe
+                    h = img_tensor.shape[-3]
+                    w = img_tensor.shape[-2]
                     processed_images.append(torch.zeros((h, w, 4 if output_format == "RGBA" else 1), dtype=torch.float32))
                     masks.append(torch.zeros((h, w), dtype=torch.float32))
                     all_bboxes.append("(0,0,0,0)")
@@ -537,7 +539,8 @@ class AutoGrabCutRemover(ScalingMixin):
                 # Final validation
                 if len(img_np.shape) != 3 or img_np.shape[2] not in [3, 4]:
                     log.warning("grabcut_node.invalid_shape", shape=list(img_np.shape))
-                    h, w = img_np.shape[0], img_np.shape[1] if len(img_np.shape) >= 2 else 512
+                    h = img_np.shape[0]
+                    w = img_np.shape[1]
                     processed_images.append(torch.zeros((h, w, 4 if output_format == "RGBA" else 1), dtype=torch.float32))
                     masks.append(torch.zeros((h, w), dtype=torch.float32))
                     all_bboxes.append("(0,0,0,0)")

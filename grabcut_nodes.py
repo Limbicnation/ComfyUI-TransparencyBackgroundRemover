@@ -286,6 +286,10 @@ class AutoGrabCutRemover(ScalingMixin):
                     "default": "RGBA",
                     "tooltip": "Output format: RGBA with alpha channel or binary MASK (0=background, 255=foreground)"
                 }),
+                "invert_mask": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Invert the output mask (foreground becomes background and vice versa)"
+                }),
                 "custom_width": ("INT", {
                     "default": 512,
                     "min": 64,
@@ -307,8 +311,8 @@ class AutoGrabCutRemover(ScalingMixin):
             }
         }
     
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "FLOAT", "STRING")
-    RETURN_NAMES = ("image", "mask", "bbox_coords", "confidence", "metrics")
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "FLOAT", "STRING", "FLOAT")
+    RETURN_NAMES = ("image", "mask", "bbox_coords", "confidence", "metrics", "bbox_tensor")
     FUNCTION = "remove_background"
     CATEGORY = "image/processing"
     
@@ -356,6 +360,7 @@ class AutoGrabCutRemover(ScalingMixin):
                          scaling_method: str = "NEAREST",
                          auto_adjust: bool = False,
                          output_format: str = "RGBA",
+                         invert_mask: bool = False,
                          custom_width: int = 512,
                          custom_height: int = 512,
                          edge_detection_mode: str = "AUTO") -> Tuple:
@@ -387,8 +392,8 @@ class AutoGrabCutRemover(ScalingMixin):
                     target_long_edge=4096,
                     maintain_aspect=True,
                     scaling_method="auto",
-                    edge_blur_amount=int(edge_blur_amount),
-                    invert_mask=False,
+                    edge_blur_amount=edge_blur_amount,
+                    invert_mask=invert_mask,
                     edge_refinement_strength=edge_refinement,
                     bbox_safety_margin=bbox_safety_margin,
                     min_bbox_size=min_bbox_size,
@@ -499,6 +504,7 @@ class AutoGrabCutRemover(ScalingMixin):
         all_bboxes = []
         all_confidences = []
         all_metrics = []
+        bbox_metadata = torch.zeros((batch_size, 6), dtype=torch.float32)
         
         for i in range(batch_size):
             _log_gpu_memory(f"batch_item_{i}.start")
@@ -550,6 +556,11 @@ class AutoGrabCutRemover(ScalingMixin):
                     # Separate RGB and alpha
                     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
                     
+                    # Apply mask inversion if requested (before any tensor creation)
+                    if invert_mask:
+                        alpha = 1.0 - alpha
+                        rgba[:, :, 3] = (alpha * 255).astype(np.uint8)
+                    
                     if output_format == "RGBA":
                         # For RGBA output: preserve transparency, don't premultiply alpha
                         # Create 4-channel RGBA tensor
@@ -575,6 +586,16 @@ class AutoGrabCutRemover(ScalingMixin):
                         all_bboxes.append("(0,0,0,0)")
                     
                     all_confidences.append(result['confidence'])
+                    
+                    # Populate batch metadata tensor [B, 6] = (x1, y1, w, h, confidence, detected)
+                    if result['bbox']:
+                        bx1, by1, bx2, by2 = result['bbox']
+                        bw = bx2 - bx1
+                        bh = by2 - by1
+                        bbox_metadata[i] = torch.tensor(
+                            [bx1, by1, bw, bh, result['confidence'], 1.0],
+                            dtype=torch.float32
+                        )
                     
                     metrics = (f"Batch {i+1}/{batch_size}: "
                               f"Time={result['processing_time_ms']}ms, "
@@ -637,7 +658,7 @@ class AutoGrabCutRemover(ScalingMixin):
         log.info("grabcut_node.remove_background.done",
                  batch_size=batch_size, mean_confidence=round(confidence_output, 3))
 
-        return (output_image, output_mask, bbox_output, confidence_output, metrics_output)
+        return (output_image, output_mask, bbox_output, confidence_output, metrics_output, bbox_metadata)
 
 
 class GrabCutRefinement(ScalingMixin):
@@ -720,6 +741,10 @@ class GrabCutRefinement(ScalingMixin):
                     "step": 8,
                     "tooltip": "Custom height (used when output_size is 'custom')"
                 }),
+                "invert_mask": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Invert the output mask (foreground becomes background and vice versa)"
+                }),
             }
         }
     
@@ -750,6 +775,7 @@ class GrabCutRefinement(ScalingMixin):
                    min_bbox_size: int = 64,
                    output_size: str = "ORIGINAL",
                    scaling_method: str = "NEAREST",
+                   invert_mask: bool = False,
                    custom_width: int = 512,
                    custom_height: int = 512) -> Tuple:
         """
@@ -775,8 +801,8 @@ class GrabCutRefinement(ScalingMixin):
                     confidence_threshold=0.5,
                 )
                 MaskParams(
-                    edge_blur_amount=int(edge_blur_amount),
-                    invert_mask=False,
+                    edge_blur_amount=edge_blur_amount,
+                    invert_mask=invert_mask,
                     edge_refinement_strength=edge_refinement,
                 )
             except Exception as exc:
@@ -826,6 +852,9 @@ class GrabCutRefinement(ScalingMixin):
                     rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
                     rgb = rgba[:, :, :3].astype(np.float32) / 255.0
                     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+                    if invert_mask:
+                        alpha = 1.0 - alpha
+                        rgba[:, :, 3] = (alpha * 255).astype(np.uint8)
                     for c in range(3):
                         rgb[:, :, c] *= alpha
                     rgb_tensor = torch.from_numpy(rgb).to(dtype=torch.float32)

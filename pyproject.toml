@@ -21,3 +21,10 @@ Documentation = "https://github.com/Limbicnation/ComfyUI-TransparencyBackgroundR
 PublisherId = "limbicnation"
 DisplayName = "Transparency Background Remover"
 Icon = "https://raw.githubusercontent.com/Limbicnation/ComfyUI-TransparencyBackgroundRemover/main/icon.png"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["cuda: tests requiring CUDA GPU"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

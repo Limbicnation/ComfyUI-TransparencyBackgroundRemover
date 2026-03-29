@@ -56,9 +56,9 @@ class ScalingParams(BaseModel):
 class MaskParams(BaseModel):
     """Parameters for mask post-processing."""
 
-    edge_blur_amount: int = Field(
-        default=0, ge=0, le=20,
-        description="Gaussian blur kernel size for mask edge softening (0=off)"
+    edge_blur_amount: float = Field(
+        default=0.0, ge=0.0, le=20.0,
+        description="Gaussian blur sigma for mask edge softening (0=off, 0.1-20.0)"
     )
     invert_mask: bool = Field(
         default=False,

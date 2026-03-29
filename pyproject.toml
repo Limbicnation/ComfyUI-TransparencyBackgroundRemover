@@ -3,7 +3,7 @@ name = "ComfyUI-TransparencyBackgroundRemover"
 version = "1.1.2"
 description = "Automatic background removal and transparency generation for ComfyUI"
 license = { file = "LICENSE" }
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Operating System :: OS Independent"
 ]

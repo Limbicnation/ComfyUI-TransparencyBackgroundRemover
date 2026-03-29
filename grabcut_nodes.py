@@ -311,7 +311,7 @@ class AutoGrabCutRemover(ScalingMixin):
             }
         }
     
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "FLOAT", "STRING", "FLOAT")
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "FLOAT", "STRING", "BBOX_TENSOR")
     RETURN_NAMES = ("image", "mask", "bbox_coords", "confidence", "metrics", "bbox_tensor")
     FUNCTION = "remove_background"
     CATEGORY = "image/processing"
@@ -385,13 +385,10 @@ class AutoGrabCutRemover(ScalingMixin):
         if validate_node_params is not None:
             try:
                 validate_node_params(
-                    grabcut_iterations=grabcut_iterations,
+                    iterations=grabcut_iterations,
                     margin=margin_pixels,
-                    edge_threshold=0.5,
                     confidence_threshold=confidence_threshold,
-                    target_long_edge=4096,
-                    maintain_aspect=True,
-                    scaling_method="auto",
+                    scaling_method=scaling_method,
                     edge_blur_amount=edge_blur_amount,
                     invert_mask=invert_mask,
                     edge_refinement_strength=edge_refinement,
@@ -498,7 +495,9 @@ class AutoGrabCutRemover(ScalingMixin):
         else:
             batch_size = 1
             image = image.unsqueeze(0)
-        
+            if initial_mask is not None and len(initial_mask.shape) == 2:
+                initial_mask = initial_mask.unsqueeze(0)
+
         processed_images = []
         masks = []
         all_bboxes = []
@@ -797,8 +796,6 @@ class GrabCutRefinement(ScalingMixin):
                 GrabCutParams(
                     iterations=grabcut_iterations,
                     margin=expand_margin,
-                    edge_threshold=0.5,
-                    confidence_threshold=0.5,
                 )
                 MaskParams(
                     edge_blur_amount=edge_blur_amount,
@@ -854,7 +851,6 @@ class GrabCutRefinement(ScalingMixin):
                     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
                     if invert_mask:
                         alpha = 1.0 - alpha
-                        rgba[:, :, 3] = (alpha * 255).astype(np.uint8)
                     for c in range(3):
                         rgb[:, :, c] *= alpha
                     rgb_tensor = torch.from_numpy(rgb).to(dtype=torch.float32)

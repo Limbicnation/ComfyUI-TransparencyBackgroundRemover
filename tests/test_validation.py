@@ -112,11 +112,19 @@ class TestScalingParams:
     def test_scaling_method_enum(self):
         """scaling_method must be one of the valid set."""
         from src.validation import ScalingParams
-        for method in ("auto", "nearest", "bilinear", "lanczos", "power-of-8"):
+        for method in ("auto", "nearest", "bilinear", "bicubic", "lanczos", "power-of-8"):
             p = ScalingParams(scaling_method=method)
             assert p.scaling_method == method
         with pytest.raises(ValidationError):
-            ScalingParams(scaling_method="bicubic")  # not in enum
+            ScalingParams(scaling_method="cubic")  # not in enum
+
+    def test_scaling_method_case_insensitive(self):
+        """scaling_method accepts uppercase (node-supplied) values."""
+        from src.validation import ScalingParams
+        p = ScalingParams(scaling_method="NEAREST")
+        assert p.scaling_method == "nearest"
+        p2 = ScalingParams(scaling_method="BILINEAR")
+        assert p2.scaling_method == "bilinear"
 
 
 class TestGrabCutNodeParamsCombined:

@@ -4,7 +4,7 @@ Security-hardened: sanitizes and validates all inputs before GPU execution.
 """
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -44,12 +44,14 @@ class ScalingParams(BaseModel):
 
     @model_validator(mode="after")
     def check_scaling_method(self) -> "ScalingParams":
-        valid = {"auto", "nearest", "bilinear", "lanczos", "power-of-8"}
-        if self.scaling_method not in valid:
+        valid = {"auto", "nearest", "bilinear", "bicubic", "lanczos", "power-of-8"}
+        normalised = self.scaling_method.lower()
+        if normalised not in valid:
             raise ValueError(
                 f"Invalid scaling_method '{self.scaling_method}'. "
                 f"Must be one of: {', '.join(sorted(valid))}"
             )
+        self.scaling_method = normalised
         return self
 
 

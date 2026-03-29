@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -85,6 +86,7 @@ class GrabCutProcessor:
 
     # Class-level YOLO model cache — shared across all instances
     _yolo_cache: Dict[str, YOLO] = {}
+    _yolo_cache_lock: threading.Lock = threading.Lock()
 
     def __init__(
         self,
@@ -140,23 +142,27 @@ class GrabCutProcessor:
 
     def _initialize_yolo(self, model_path: Optional[str] = None) -> None:
         """Initialize YOLO model, using class-level cache for efficiency."""
-        cache_key = model_path if model_path and os.path.exists(model_path) else "yolov8n.pt"
+        model_name = model_path if model_path and os.path.exists(model_path) else "yolov8n.pt"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        cache_key = f"{model_name}::{device}"
 
         try:
-            if cache_key not in GrabCutProcessor._yolo_cache:
-                log.info("grabcut_processor.yolo_loading", model=cache_key)
-                GrabCutProcessor._yolo_cache[cache_key] = YOLO(cache_key)
-                # Attempt torch.compile for H100 acceleration
-                try:
-                    GrabCutProcessor._yolo_cache[cache_key].model = torch.compile(
-                        GrabCutProcessor._yolo_cache[cache_key].model,
-                    )
-                    log.info("grabcut_processor.torch_compile.success", model=cache_key)
-                except Exception as compile_err:
-                    log.info("grabcut_processor.torch_compile.skipped",
-                             reason=str(compile_err))
-                log.info("grabcut_processor.yolo_loaded", model=cache_key)
-            self.yolo_model = GrabCutProcessor._yolo_cache[cache_key]
+            with GrabCutProcessor._yolo_cache_lock:
+                if cache_key not in GrabCutProcessor._yolo_cache:
+                    log.info("grabcut_processor.yolo_loading", model=model_name, device=device)
+                    GrabCutProcessor._yolo_cache[cache_key] = YOLO(model_name)
+                    # Attempt torch.compile for H100 acceleration (CUDA only)
+                    if torch.cuda.is_available():
+                        try:
+                            GrabCutProcessor._yolo_cache[cache_key].model = torch.compile(
+                                GrabCutProcessor._yolo_cache[cache_key].model,
+                            )
+                            log.info("grabcut_processor.torch_compile.success", model=model_name)
+                        except Exception as compile_err:
+                            log.info("grabcut_processor.torch_compile.skipped",
+                                     reason=str(compile_err))
+                    log.info("grabcut_processor.yolo_loaded", model=model_name, device=device)
+                self.yolo_model = GrabCutProcessor._yolo_cache[cache_key]
         except Exception as e:
             log.warning("grabcut_processor.yolo_init_failed",
                         error=str(e), fallback="manual_rectangle")

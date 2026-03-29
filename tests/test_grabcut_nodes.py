@@ -19,10 +19,10 @@ class TestAutoGrabCutRemoverReturnTypes:
         from grabcut_nodes import AutoGrabCutRemover
         assert "bbox_tensor" in AutoGrabCutRemover.RETURN_NAMES
 
-    def test_bbox_tensor_is_float_type(self):
-        """The 6th RETURN_TYPE is FLOAT (tensor)."""
+    def test_bbox_tensor_is_bbox_tensor_type(self):
+        """The 6th RETURN_TYPE is BBOX_TENSOR (custom type for [B,6] metadata)."""
         from grabcut_nodes import AutoGrabCutRemover
-        assert "FLOAT" in AutoGrabCutRemover.RETURN_TYPES
+        assert "BBOX_TENSOR" in AutoGrabCutRemover.RETURN_TYPES
 
 
 class TestAutoGrabCutRemoverValidation:

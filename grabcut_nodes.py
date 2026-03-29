@@ -26,17 +26,16 @@ except ImportError:
     from grabcut_remover import GrabCutProcessor, create_fallback_processor, _log_gpu_memory
 
 # Pydantic validation — security-hardened parameter sanitisation before GPU execution
+import os.path as _path
+import sys as _sys
+_parent = _path.dirname(__file__)
+if _parent not in _sys.path:
+    _sys.path.insert(0, _parent)
 try:
     from src.validation import validate_node_params, GrabCutParams, MaskParams
 except ImportError:
-    import os.path as _path
-    import sys as _sys
-    _sys.path.insert(0, _path.dirname(__file__))
-    try:
-        from src.validation import validate_node_params, GrabCutParams, MaskParams
-    except ImportError:
-        # Graceful degradation — log and continue without validation
-        validate_node_params = GrabCutParams = MaskParams = None
+    # Graceful degradation — log and continue without validation
+    validate_node_params = GrabCutParams = MaskParams = None
 
 
 class ScalingMixin:
@@ -144,7 +143,7 @@ class ScalingMixin:
         # The scaled image will fit within target dimensions, potentially smaller on one axis
         
         # Use class-level resampling map for better performance
-        resampling_method = self._RESAMPLING_MAP.get(scaling_method, Image.Resampling.NEAREST)
+        resampling_method = self._RESAMPLING_MAP.get(scaling_method.upper(), Image.Resampling.NEAREST)
         
         return image_pil.resize(
             (new_width, new_height),
@@ -384,7 +383,7 @@ class AutoGrabCutRemover(ScalingMixin):
         # --- Pydantic validation: sanitise ALL user params before GPU execution ---
         if validate_node_params is not None:
             try:
-                validate_node_params(
+                validated = validate_node_params(
                     iterations=grabcut_iterations,
                     margin=margin_pixels,
                     confidence_threshold=confidence_threshold,
@@ -399,6 +398,8 @@ class AutoGrabCutRemover(ScalingMixin):
                     output_format=output_format,
                     auto_adjust=auto_adjust,
                 )
+                # Use normalised values from Pydantic (e.g. scaling_method lowercased)
+                scaling_method = validated.scaling_method
             except Exception as exc:
                 log.error("grabcut_node.validation_failed", node="AutoGrabCutRemover", error=str(exc))
                 raise ValueError(f"[AutoGrabCutRemover] Invalid parameters: {exc}") from exc
@@ -495,8 +496,10 @@ class AutoGrabCutRemover(ScalingMixin):
         else:
             batch_size = 1
             image = image.unsqueeze(0)
-            if initial_mask is not None and len(initial_mask.shape) == 2:
-                initial_mask = initial_mask.unsqueeze(0)
+
+        # Ensure initial_mask has batch dimension regardless of image path
+        if initial_mask is not None and len(initial_mask.shape) == 2:
+            initial_mask = initial_mask.unsqueeze(0)
 
         processed_images = []
         masks = []
@@ -793,15 +796,21 @@ class GrabCutRefinement(ScalingMixin):
         # --- Pydantic validation: sanitise params before GPU execution ---
         if GrabCutParams is not None and MaskParams is not None:
             try:
-                GrabCutParams(
+                validated_gc = GrabCutParams(
                     iterations=grabcut_iterations,
                     margin=expand_margin,
                 )
-                MaskParams(
+                validated_mask = MaskParams(
                     edge_blur_amount=edge_blur_amount,
                     invert_mask=invert_mask,
                     edge_refinement_strength=edge_refinement,
                 )
+                # Use validated/clamped values
+                grabcut_iterations = validated_gc.iterations
+                expand_margin = validated_gc.margin
+                edge_blur_amount = validated_mask.edge_blur_amount
+                invert_mask = validated_mask.invert_mask
+                edge_refinement = validated_mask.edge_refinement_strength
             except Exception as exc:
                 log.error("grabcut_node.validation_failed",
                           node="GrabCutRefinement", error=str(exc))

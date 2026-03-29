@@ -39,7 +39,7 @@ class ScalingParams(BaseModel):
     )
     scaling_method: str = Field(
         default="auto",
-        description="Scaling method: auto, nearest, bilinear, lanczos, power-of-8"
+        description="Scaling method: auto, nearest, bilinear, bicubic, lanczos, power-of-8"
     )
 
     @model_validator(mode="after")

@@ -1,7 +1,9 @@
-torch
-numpy
-Pillow
-opencv-python
-opencv-contrib-python
-scikit-learn
-ultralytics
+torch>=2.1.0
+numpy>=1.24.0
+Pillow>=10.4.0
+opencv-python>=4.10.0
+opencv-contrib-python>=4.10.0
+scikit-learn>=1.4.0
+ultralytics>=8.3.0
+structlog>=24.4.0
+pydantic>=2.7.0

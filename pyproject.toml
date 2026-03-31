@@ -1,9 +1,9 @@
 [project]
 name = "ComfyUI-TransparencyBackgroundRemover"
-version = "1.1.2"
+version = "1.1.3"
 description = "Automatic background removal and transparency generation for ComfyUI"
 license = { file = "LICENSE" }
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Operating System :: OS Independent"
 ]
@@ -21,3 +21,10 @@ Documentation = "https://github.com/Limbicnation/ComfyUI-TransparencyBackgroundR
 PublisherId = "limbicnation"
 DisplayName = "Transparency Background Remover"
 Icon = "https://raw.githubusercontent.com/Limbicnation/ComfyUI-TransparencyBackgroundRemover/main/icon.png"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["cuda: tests requiring CUDA GPU"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

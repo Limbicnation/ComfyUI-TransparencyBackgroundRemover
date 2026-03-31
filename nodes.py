@@ -211,6 +211,7 @@ class TransparencyBackgroundRemover:
             resampling_method
         )
 
+    @torch.no_grad()
     def remove_background(self, image, tolerance=30, edge_sensitivity=0.8,
                          foreground_bias=0.7, color_clusters=8, binary_threshold=128,
                          edge_refinement=True, dither_handling=True, output_format="RGBA",
@@ -349,12 +350,12 @@ class TransparencyBackgroundRemover:
         # Convert back to ComfyUI tensor format
         if output_format == "RGBA":
             # For RGBA, maintain 4 channels
-            result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+            result_tensor = torch.from_numpy(np.array(results)).to(dtype=torch.float32) / 255.0
         else:
             # For RGB_WITH_MASK, use 3 channels
-            result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
+            result_tensor = torch.from_numpy(np.array(results)).to(dtype=torch.float32) / 255.0
         
-        mask_tensor = torch.from_numpy(np.array(masks)).float() / 255.0
+        mask_tensor = torch.from_numpy(np.array(masks)).to(dtype=torch.float32) / 255.0
 
         return result_tensor, mask_tensor
 
@@ -434,6 +435,7 @@ class TransparencyBackgroundRemoverBatch:
     FUNCTION = "batch_remove_background"
     CATEGORY = "image/processing"
 
+    @torch.no_grad()
     def batch_remove_background(self, images, tolerance=30, edge_sensitivity=0.8, 
                                auto_adjust=True, foreground_bias=0.7, color_clusters=8,
                                edge_refinement=True, dither_handling=True, binary_threshold=128,
@@ -559,8 +561,8 @@ class TransparencyBackgroundRemoverBatch:
             processing_stats['avg_processing_time'] = total_processing_time / batch_size if batch_size > 0 else 0.0
 
             # Convert results to tensors
-            result_tensor = torch.from_numpy(np.array(results)).float() / 255.0
-            mask_tensor = torch.from_numpy(np.array(masks)).float() / 255.0
+            result_tensor = torch.from_numpy(np.array(results)).to(dtype=torch.float32) / 255.0
+            mask_tensor = torch.from_numpy(np.array(masks)).to(dtype=torch.float32) / 255.0
 
             # Generate summary report
             summary_report = self._generate_summary_report(processing_stats, reports if progress_reporting else [])

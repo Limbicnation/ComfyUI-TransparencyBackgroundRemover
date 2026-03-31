@@ -401,7 +401,19 @@ class AutoGrabCutRemover(ScalingMixin):
                     auto_adjust=auto_adjust,
                 )
                 # Use normalised values from Pydantic (e.g. scaling_method lowercased)
+                grabcut_iterations = validated.iterations
+                margin_pixels = validated.margin
+                confidence_threshold = validated.confidence_threshold
                 scaling_method = validated.scaling_method
+                edge_blur_amount = validated.edge_blur_amount
+                invert_mask = validated.invert_mask
+                edge_refinement = validated.edge_refinement_strength
+                bbox_safety_margin = validated.bbox_safety_margin
+                min_bbox_size = validated.min_bbox_size
+                fallback_margin_percent = validated.fallback_margin_percent
+                binary_threshold = validated.binary_threshold
+                output_format = validated.output_format
+                auto_adjust = validated.auto_adjust
             except Exception as exc:
                 log.error("grabcut_node.validation_failed", node="AutoGrabCutRemover", error=str(exc))
                 raise ValueError(f"[AutoGrabCutRemover] Invalid parameters: {exc}") from exc
@@ -882,8 +894,6 @@ class GrabCutRefinement(ScalingMixin):
                     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
                     if invert_mask:
                         alpha = 1.0 - alpha
-                    for c in range(3):
-                        rgb[:, :, c] *= alpha
                     rgb_tensor = torch.from_numpy(rgb).to(dtype=torch.float32)
                     alpha_tensor = torch.from_numpy(alpha).to(dtype=torch.float32)
                     refined_images.append(rgb_tensor)

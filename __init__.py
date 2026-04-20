@@ -18,6 +18,21 @@ except ImportError:
 # Import main transparency background remover nodes
 from .nodes import NODE_CLASS_MAPPINGS as NODES_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as NODES_DISPLAY_MAPPINGS
 
+# Import standalone RemoveBackgroundAndResizeNode
+try:
+    from .RemoveBackgroundAndResizeNode import (
+        NODE_CLASS_MAPPINGS as REMBG_MAPPINGS,
+        NODE_DISPLAY_NAME_MAPPINGS as REMBG_DISPLAY_MAPPINGS,
+    )
+    REMBG_AVAILABLE = True
+except ImportError as e:
+    REMBG_MAPPINGS = {}
+    REMBG_DISPLAY_MAPPINGS = {}
+    REMBG_AVAILABLE = False
+    print("\n" + "="*70)
+    print("ℹ️  RemoveBackgroundAndResizeNode unavailable:", str(e))
+    print("="*70 + "\n")
+
 # Try to import GrabCut nodes (optional - requires ultralytics)
 try:
     from .grabcut_nodes import NODE_CLASS_MAPPINGS as GRABCUT_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as GRABCUT_DISPLAY_MAPPINGS
@@ -37,8 +52,8 @@ except ImportError as e:
     print("\nMain background remover nodes are still available!")
     print("="*70 + "\n")
 
-# Combine node mappings from both modules
-NODE_CLASS_MAPPINGS = {**NODES_MAPPINGS, **GRABCUT_MAPPINGS}
-NODE_DISPLAY_NAME_MAPPINGS = {**NODES_DISPLAY_MAPPINGS, **GRABCUT_DISPLAY_MAPPINGS}
+# Combine node mappings from all modules
+NODE_CLASS_MAPPINGS = {**NODES_MAPPINGS, **GRABCUT_MAPPINGS, **REMBG_MAPPINGS}
+NODE_DISPLAY_NAME_MAPPINGS = {**NODES_DISPLAY_MAPPINGS, **GRABCUT_DISPLAY_MAPPINGS, **REMBG_DISPLAY_MAPPINGS}
 
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']

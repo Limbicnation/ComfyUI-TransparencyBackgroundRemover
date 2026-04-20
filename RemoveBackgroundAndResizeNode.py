@@ -14,93 +14,27 @@ License: Apache-2.0
 
 from __future__ import annotations
 
-import structlog
+import logging
 from typing import Optional, Tuple
 
 import numpy as np
 import torch
 from PIL import Image
 
-log = structlog.get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# ComfyUI import guards
-# ---------------------------------------------------------------------------
 try:
-    import comfy.utils
-
-    _COMFY_AVAILABLE = True
+    import structlog
+    log = structlog.get_logger(__name__)
 except ImportError:
-    _COMFY_AVAILABLE = False
-    log.info("RemoveBackgroundAndResizeNode.comfyui_unavailable")
+    log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# ScalingMixin — shared resize logic (from grabcut_nodes.py)
+# ScalingMixin — shared resize logic (see scaling.py)
 # ---------------------------------------------------------------------------
 
-class ScalingMixin:
-    """
-    Provides deterministic resize helpers with power-of-8 size support.
-    Mix into any node class that needs resize.
-    """
-
-    _RESAMPLING_MAP = {
-        "NEAREST": Image.Resampling.NEAREST,
-        "BILINEAR": Image.Resampling.BILINEAR,
-        "BICUBIC": Image.Resampling.BICUBIC,
-        "LANCZOS": Image.Resampling.LANCZOS,
-    }
-
-    @staticmethod
-    def _parse_size(size_str: str) -> Optional[Tuple[int, int]]:
-        """Parse ``WIDTHxHEIGHT`` string → ``(w, h)`` or ``None`` for ORIGINAL."""
-        if size_str == "ORIGINAL":
-            return None
-        try:
-            w, h = size_str.lower().split("x")
-            return int(w), int(h)
-        except (ValueError, AttributeError):
-            raise ValueError(f"Invalid size format: {size_str!r}. Use WxH or ORIGINAL.")
-
-    @staticmethod
-    def _scale_factor(current: Tuple[int, int], target: Tuple[int, int]) -> float:
-        """Smallest scale that fits image inside target, preserving aspect."""
-        sw = target[0] / current[0]
-        sh = target[1] / current[1]
-        return min(sw, sh)
-
-    # ------------------------------------------------------------------
-    # public helpers (override in node class if you need custom behaviour)
-    # ------------------------------------------------------------------
-    def resize_image(
-        self,
-        image: Image.Image,
-        size_str: str,
-        method: str = "LANCZOS",
-    ) -> Image.Image:
-        """
-        Resize ``image`` to fit inside the dimensions described by ``size_str``.
-
-        Uses ``Image.resize`` with the selected interpolation method.
-        When ``size_str == "ORIGINAL`` the image is returned unchanged.
-        """
-        if size_str == "ORIGINAL":
-            return image
-
-        target = self._parse_size(size_str)
-        if target is None:
-            return image  # should not reach
-
-        cur = (image.width, image.height)
-        if cur == target:
-            return image
-
-        factor = self._scale_factor(cur, target)
-        new_w = max(1, int(image.width * factor))
-        new_h = max(1, int(image.height * factor))
-
-        resample = self._RESAMPLING_MAP.get(method.upper(), Image.Resampling.LANCZOS)
-        return image.resize((new_w, new_h), resample)
+try:
+    from .scaling import ScalingMixin  # noqa: F401 — re-exported for convenience
+except ImportError:
+    from scaling import ScalingMixin
 
 
 # ---------------------------------------------------------------------------
@@ -108,14 +42,36 @@ class ScalingMixin:
 # ---------------------------------------------------------------------------
 
 def _kmeans_colors(
-    arr: np.ndarray, n_clusters: int, tol: float = 0.01, max_iter: int = 20
+    arr: np.ndarray, n_clusters: int, tol: float = 0.01, max_iter: int = 20,
+    max_samples: int = 50000,
 ) -> np.ndarray:
     """
     Simple k-means on pixel array [H*W, channels].
     Returns ``(n_clusters, channels)`` cluster centres.
     Fallback when scikit-learn is unavailable.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input image array (H, W, C).
+    n_clusters : int
+        Number of k-means clusters.
+    tol : float
+        Convergence tolerance for centre shift.
+    max_iter : int
+        Maximum k-means iterations.
+    max_samples : int
+        Cap on number of pixels fed to k-means to avoid OOM on large images.
+        Subsampled uniformly when pixel count exceeds this value.
     """
     pixels = arr.reshape(-1, arr.shape[-1]).astype(np.float32)
+
+    # Subsample to avoid OOM on large images (e.g. 4K → 8.3M pixels)
+    if len(pixels) > max_samples:
+        rng = np.random.RandomState(42)
+        idx = rng.choice(len(pixels), size=max_samples, replace=False)
+        pixels = pixels[idx]
+
     indices = np.random.RandomState(42).choice(
         len(pixels), size=n_clusters, replace=False
     )
@@ -155,7 +111,6 @@ def _dominant_bg(arr: np.ndarray, samples: int = 5000) -> np.ndarray:
 def remove_background_pil(
     image: Image.Image,
     tolerance: int = 30,
-    edge_sensitivity: float = 0.8,
     color_clusters: int = 8,
     foreground_bias: float = 0.7,
     binary_threshold: int = 128,
@@ -179,8 +134,6 @@ def remove_background_pil(
         Input image (RGB or RGBA; RGBA ``A`` is ignored).
     tolerance : int
         Colour distance threshold (0-255). Higher = more pixels accepted as foreground.
-    edge_sensitivity : float
-        Fraction of edge region sampled for background estimation (0-1).
     color_clusters : int
         K-means centres used to identify distinct colours.
     foreground_bias : float
@@ -262,7 +215,7 @@ class RemoveBackgroundAndResizeNode(ScalingMixin):
     RETURN_NAMES = ("image", "mask")
     FUNCTION = "process"
     CATEGORY = "image/processing"
-    OUTPUT_NODE = False
+    OUTPUT_NODE = True
 
     @classmethod
     def INPUT_TYPES(cls):

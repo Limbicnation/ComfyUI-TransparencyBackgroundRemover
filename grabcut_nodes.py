@@ -40,21 +40,21 @@ except ImportError:
     validate_node_params = GrabCutParams = MaskParams = None
 
 
-class ScalingMixin:
+# Import shared ScalingMixin base and extend with GrabCut-specific methods
+try:
+    from .scaling import ScalingMixin as _BaseScalingMixin
+except ImportError:
+    from scaling import ScalingMixin as _BaseScalingMixin
+
+
+class ScalingMixin(_BaseScalingMixin):
     """
-    Mixin class providing shared scaling functionality for GrabCut nodes.
-    Eliminates code duplication and improves performance.
+    Extended ScalingMixin for GrabCut nodes.
+
+    Inherits core resize helpers from ``scaling.ScalingMixin`` and adds
+    GrabCut-specific methods: ``parse_output_size``, ``intelligent_scale``,
+    and ``_apply_resize``.
     """
-    
-    # Class-level constants
-    
-    # Class-level resampling map to avoid recreation on every call
-    _RESAMPLING_MAP = {
-        "NEAREST": Image.Resampling.NEAREST,
-        "BILINEAR": Image.Resampling.BILINEAR,
-        "BICUBIC": Image.Resampling.BICUBIC,
-        "LANCZOS": Image.Resampling.LANCZOS
-    }
     
     @staticmethod
     def parse_output_size(size_string: str) -> Optional[Tuple[int, int]]:
@@ -84,9 +84,7 @@ class ScalingMixin:
         Calculate optimal scaling factor while preserving aspect ratio.
         
         Uses the smaller of width/height scale factors to ensure the scaled image
-        fits within target dimensions without exceeding them. This means the final
-        image may be smaller than target_size in one dimension to maintain the
-        original aspect ratio.
+        fits within target dimensions without exceeding them.
         
         Args:
             current_size: Tuple (width, height) of current image
@@ -94,21 +92,12 @@ class ScalingMixin:
             
         Returns:
             Scaling factor that preserves aspect ratio and fits within target_size
-            
-        Example:
-            current_size=(100, 200), target_size=(150, 150)
-            -> scale_w=1.5, scale_h=0.75, returns min(1.5, 0.75) = 0.75
-            -> final size would be (75, 150) to preserve aspect ratio
         """
         current_w, current_h = current_size
         target_w, target_h = target_size
         
-        # Calculate scale factors for width and height
         scale_w = target_w / current_w
         scale_h = target_h / current_h
-        
-        # Use the same scale for both dimensions to maintain aspect ratio
-        # Choose the smaller scale to ensure we don't exceed target dimensions
         scale_factor = min(scale_w, scale_h)
         
         return scale_factor
@@ -120,7 +109,7 @@ class ScalingMixin:
         Args:
             image_pil: PIL Image object
             target_size: Tuple (width, height) for target dimensions
-            scaling_method: Interpolation method ("NEAREST", "BILINEAR", "BICUBIC", "LANCZOS")
+            scaling_method: Interpolation method (\"NEAREST\", \"BILINEAR\", \"BICUBIC\", \"LANCZOS\")
             
         Returns:
             Scaled PIL Image
@@ -130,21 +119,14 @@ class ScalingMixin:
             
         current_size = (image_pil.width, image_pil.height)
         
-        # If already at target size, return as-is
         if current_size == target_size:
             return image_pil
         
-        # Calculate scaling factor
         scale_factor = self.calculate_scaling_factor(current_size, target_size)
         
-        # Apply scaling
         new_width = int(image_pil.width * scale_factor)
         new_height = int(image_pil.height * scale_factor)
         
-        # Note: Removed dimension snapping to preserve perfect aspect ratio
-        # The scaled image will fit within target dimensions, potentially smaller on one axis
-        
-        # Use class-level resampling map for better performance
         resampling_method = self._RESAMPLING_MAP.get(scaling_method.upper(), Image.Resampling.NEAREST)
         
         return image_pil.resize(
@@ -170,7 +152,6 @@ class ScalingMixin:
         if output_size == "ORIGINAL":
             return image_np
         
-        # Parse target dimensions
         if output_size == "custom":
             target_dimensions = (custom_width, custom_height)
         else:
@@ -179,13 +160,9 @@ class ScalingMixin:
         if target_dimensions is None:
             return image_np
         
-        # Convert to PIL Image for scaling
         image_pil = Image.fromarray(image_np, 'RGBA')
-        
-        # Apply intelligent scaling with specified method
         scaled_pil = self.intelligent_scale(image_pil, target_dimensions, scaling_method)
         
-        # Convert back to numpy
         return np.array(scaled_pil)
 
 

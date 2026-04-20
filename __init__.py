@@ -25,7 +25,7 @@ try:
         NODE_DISPLAY_NAME_MAPPINGS as REMBG_DISPLAY_MAPPINGS,
     )
     REMBG_AVAILABLE = True
-except Exception as e:
+except ImportError as e:
     REMBG_MAPPINGS = {}
     REMBG_DISPLAY_MAPPINGS = {}
     REMBG_AVAILABLE = False

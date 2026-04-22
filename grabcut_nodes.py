@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from typing import Optional, Tuple
 
 import numpy as np
@@ -10,10 +9,17 @@ from PIL import Image
 
 log = structlog.get_logger(__name__)
 
+import os.path as _path  # noqa: E402
+import sys as _sys  # noqa: E402
+
+_parent = _path.dirname(__file__)
+if _parent not in _sys.path:
+    _sys.path.insert(0, _parent)
+
 # Try to import ComfyUI modules
 try:
-    import folder_paths
-    import comfy.utils
+    import folder_paths  # noqa: F401
+    import comfy.utils  # noqa: F401
     COMFY_AVAILABLE = True
 except ImportError:
     COMFY_AVAILABLE = False
@@ -26,11 +32,6 @@ except ImportError:
     from grabcut_remover import GrabCutProcessor, create_fallback_processor, _log_gpu_memory
 
 # Pydantic validation — security-hardened parameter sanitisation before GPU execution
-import os.path as _path
-import sys as _sys
-_parent = _path.dirname(__file__)
-if _parent not in _sys.path:
-    _sys.path.insert(0, _parent)
 try:
     from src.validation import validate_node_params, GrabCutParams, MaskParams
 except ImportError:

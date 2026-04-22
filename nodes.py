@@ -1,9 +1,8 @@
-import os
 import numpy as np
 import torch
 from PIL import Image
 import cv2
-import colorsys
+import tempfile
 
 # Handle ComfyUI imports gracefully for testing
 try:
@@ -17,7 +16,7 @@ except ImportError:
     
     # Create mock folder_paths
     folder_paths = ModuleType('folder_paths')
-    folder_paths.get_input_directory = lambda: '/tmp'
+    folder_paths.get_input_directory = lambda: tempfile.gettempdir()
     sys.modules['folder_paths'] = folder_paths
     
     # Create mock comfy.utils

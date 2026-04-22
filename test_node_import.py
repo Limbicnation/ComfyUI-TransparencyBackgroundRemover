@@ -15,7 +15,7 @@ from grabcut_nodes import NODE_CLASS_MAPPINGS as GRABCUT_MAPPINGS, NODE_DISPLAY_
 NODE_CLASS_MAPPINGS = {**NODES_MAPPINGS, **GRABCUT_MAPPINGS}
 NODE_DISPLAY_NAME_MAPPINGS = {**NODES_DISPLAY_MAPPINGS, **GRABCUT_DISPLAY_MAPPINGS}
 
-print(f"✓ Successfully imported and combined node mappings")
+print("✓ Successfully imported and combined node mappings")
 print(f"Found {len(NODE_CLASS_MAPPINGS)} total nodes:")
 for name, cls in NODE_CLASS_MAPPINGS.items():
     display = NODE_DISPLAY_NAME_MAPPINGS.get(name, "Unknown")

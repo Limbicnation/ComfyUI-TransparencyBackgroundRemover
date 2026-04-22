@@ -15,7 +15,7 @@ License: Apache-2.0
 from __future__ import annotations
 
 import logging
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import torch

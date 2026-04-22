@@ -69,8 +69,11 @@
 - `torch` - PyTorch for tensor operations
 - `numpy` - Numerical computing
 - `Pillow` - Image processing
-- `opencv-python` - Computer vision operations
+- `opencv-python` / `opencv-contrib-python` - Computer vision operations
 - `scikit-learn` - Machine learning algorithms for clustering
+- `ultralytics` - YOLO object detection for Auto GrabCut
+- `pydantic` - Parameter validation and sanitisation
+- `structlog` - Structured logging
 
 ### ⚠️ Important: Dependency Installation
 
@@ -369,6 +372,76 @@ The system automatically adjusts `edge_blur_amount` based on image analysis:
 - **Analysis-Based**: Considers edge density, color variance, and noise characteristics
 - **Conservative Adjustments**: Small incremental changes preserve user intent while optimizing quality
 - **First Image Only**: In batch processing, analysis is performed on the first image and applied to all
+
+---
+
+## 🖼️ Remove Background and Resize Node
+
+### Overview
+The **RemoveBackgroundAndResizeNode** provides standalone PIL-only background removal with integrated resize functionality. Unlike the main transparency node, this implementation uses pure Pillow operations without OpenCV, making it lightweight and dependency-minimal for simple workflows.
+
+### Key Features
+- **PIL-Only Processing**: No OpenCV required — uses Pillow for all image operations
+- **Integrated Resize**: Background removal and resizing in a single node
+- **Lightweight**: Minimal memory footprint for batch workflows
+
+### Node Parameters
+
+| Parameter | Type | Range/Options | Default | Description |
+|-----------|------|---------------|---------|-------------|
+| **width** | INT | 64-4096 | 512 | Output width |
+| **height** | INT | 64-4096 | 512 | Output height |
+| **upscale_method** | DROPDOWN | NEAREST, BILINEAR, BICUBIC, LANCZOS | LANCZOS | Interpolation method |
+
+---
+
+## 🔧 Development
+
+### Testing
+
+```bash
+# Install test dependencies
+pip install pytest
+
+# Run test suite
+python -m pytest tests/ -v
+
+# Run standalone test scripts
+python test_scaling.py
+python test_power_of_8_scaling.py
+python test_standalone.py
+python test_power_of_8_standalone.py
+```
+
+### Linting & Security
+
+```bash
+# Run ruff (fast Python linter)
+ruff check .
+
+# Run flake8 (critical error checks)
+flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+# Run bandit (security scan)
+bandit -r .
+```
+
+### Project Structure
+
+```
+.
+├── __init__.py              # ComfyUI node registration
+├── nodes.py                 # Core TransparencyBackgroundRemover nodes
+├── background_remover.py    # EnhancedPixelArtProcessor engine
+├── grabcut_nodes.py         # Auto GrabCut + Refinement nodes
+├── grabcut_remover.py       # GrabCutProcessor engine
+├── RemoveBackgroundAndResizeNode.py  # PIL-only resize node
+├── src/validation.py        # Pydantic parameter validation
+├── tests/                   # Pytest test suite
+├── requirements.txt         # Python dependencies
+├── install.py               # Dependency installer
+└── examples/                # Example images and workflows
+```
 
 ---
 

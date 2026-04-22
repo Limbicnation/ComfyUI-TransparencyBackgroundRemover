@@ -172,3 +172,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# IDE / Editor artifacts
+.claude/
+
+# Build artifacts
+*.zip

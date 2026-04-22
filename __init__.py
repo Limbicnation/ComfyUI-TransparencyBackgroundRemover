@@ -1,6 +1,6 @@
 # Check for optional dependencies and provide helpful warnings
 try:
-    import sklearn
+    import sklearn  # noqa: F401
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False

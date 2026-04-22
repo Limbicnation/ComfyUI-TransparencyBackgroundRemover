@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import colorsys
 from typing import Tuple, Optional, List
 
 # Lazy import sklearn with graceful fallback

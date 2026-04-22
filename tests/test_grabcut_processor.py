@@ -109,7 +109,6 @@ class TestRefineEdges:
 
     def test_refine_edges_returns_uint8_mask(self, grabcut_processor, sample_mask_hw):
         """refine_edges returns uint8 array with 0/255 values."""
-        import cv2
         rgb = np.zeros((256, 256, 3), dtype=np.uint8)
         result = grabcut_processor.refine_edges(sample_mask_hw, rgb)
         assert result.dtype == np.uint8
@@ -121,7 +120,6 @@ class TestRefineEdges:
         """With zero refinement strength, mask is returned unchanged (type may differ)."""
         grabcut_processor.edge_refinement_strength = 0.0
         grabcut_processor.edge_blur_amount = 0.0
-        import cv2
         rgb = np.zeros((256, 256, 3), dtype=np.uint8)
         result = grabcut_processor.refine_edges(sample_mask_hw, rgb)
         assert result.shape == sample_mask_hw.shape

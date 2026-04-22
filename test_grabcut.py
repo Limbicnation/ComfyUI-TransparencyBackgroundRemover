@@ -6,9 +6,7 @@ Tests both standalone processing and ComfyUI node integration.
 
 import numpy as np
 import cv2
-from pathlib import Path
 import sys
-import time
 
 # Test imports
 print("Testing imports...")
@@ -78,7 +76,7 @@ def test_grabcut_processor():
         result = processor.process_with_grabcut(test_img, target_class="auto")
         
         if result['success']:
-            print(f"✓ Processing successful!")
+            print("✓ Processing successful!")
             print(f"  - Processing time: {result['processing_time_ms']}ms")
             print(f"  - Detection confidence: {result['confidence']:.2f}")
             if result['bbox']:
@@ -334,7 +332,7 @@ def test_bbox_validation_fixes():
                 print(f"✗ Error with safety margin {safety_margin}: {e}")
         
         # Test minimum bbox size functionality with small object simulation
-        print(f"\n--- Testing min_bbox_size functionality ---")
+        print("\n--- Testing min_bbox_size functionality ---")
         
         # Create a small test image with a tiny object to force min_bbox_size logic
         small_test_image = torch.zeros((1, 200, 200, 3))  # Small 200x200 image
@@ -373,7 +371,7 @@ def test_bbox_validation_fixes():
                     else:
                         print(f"    ✗ Bbox size not enforced: {actual_width}x{actual_height} < {min_size}")
                 else:
-                    print(f"    ⚠ No valid bbox detected, using fallback")
+                    print("    ⚠ No valid bbox detected, using fallback")
                     
             except Exception as e:
                 print(f"    ✗ Error with min_bbox_size {min_size}: {e}")
@@ -431,7 +429,7 @@ def test_edge_blur_functionality():
                     if len(mask_values) > 2:
                         print(f"  ✓ Soft edges detected (unique values: {len(mask_values)})")
                     else:
-                        print(f"  ⚠ Expected soft edges but found binary mask")
+                        print("  ⚠ Expected soft edges but found binary mask")
                 else:
                     print(f"  ✓ Binary edges preserved (unique values: {len(mask_values)})")
                     

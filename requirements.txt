@@ -5,3 +5,5 @@ opencv-python
 opencv-contrib-python
 scikit-learn
 ultralytics
+pydantic>=2.0
+structlog>=23.0

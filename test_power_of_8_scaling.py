@@ -97,7 +97,7 @@ def test_input_types():
             if sizes == expected_sizes:
                 print("✅ output_size parameter configured correctly")
             else:
-                print(f"❌ output_size sizes mismatch")
+                print("❌ output_size sizes mismatch")
                 print(f"   Expected: {expected_sizes}")
                 print(f"   Got: {sizes}")
                 return False

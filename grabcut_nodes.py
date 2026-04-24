@@ -356,6 +356,49 @@ class AutoGrabCutRemover(ScalingMixin):
         Returns:
             Tuple of (processed_image, mask, bbox_string, confidence, metrics)
         """
+        # --- Pydantic validation: sanitise ALL user params before GPU execution ---
+        if validate_node_params is not None:
+            try:
+                validated = validate_node_params(
+                    iterations=grabcut_iterations,
+                    margin=margin_pixels,
+                    confidence_threshold=confidence_threshold,
+                    scaling_method=scaling_method,
+                    edge_blur_amount=edge_blur_amount,
+                    invert_mask=invert_mask,
+                    edge_refinement_strength=edge_refinement,
+                    bbox_safety_margin=bbox_safety_margin,
+                    min_bbox_size=min_bbox_size,
+                    fallback_margin_percent=fallback_margin_percent,
+                    binary_threshold=binary_threshold,
+                    output_format=output_format,
+                    auto_adjust=auto_adjust,
+                )
+                # Use normalised values from Pydantic (e.g. scaling_method lowercased)
+                grabcut_iterations = validated.iterations
+                margin_pixels = validated.margin
+                confidence_threshold = validated.confidence_threshold
+                scaling_method = validated.scaling_method
+                edge_blur_amount = validated.edge_blur_amount
+                invert_mask = validated.invert_mask
+                edge_refinement = validated.edge_refinement_strength
+                bbox_safety_margin = validated.bbox_safety_margin
+                min_bbox_size = validated.min_bbox_size
+                fallback_margin_percent = validated.fallback_margin_percent
+                binary_threshold = validated.binary_threshold
+                output_format = validated.output_format
+                auto_adjust = validated.auto_adjust
+            except Exception as exc:
+                log.error("grabcut_node.validation_failed", node="AutoGrabCutRemover", error=str(exc))
+                raise ValueError(f"[AutoGrabCutRemover] Invalid parameters: {exc}") from exc
+
+        log.info("grabcut_node.remove_background.start",
+                 batch_size=image.shape[0] if len(image.shape) == 4 else 1,
+                 output_format=output_format)
+        if torch.cuda.is_available():
+            log.debug("gpu_memory.remove_background.start",
+                      allocated_gb=round(torch.cuda.memory_allocated() / 1e9, 3))
+
         # Ensure processor is initialized
         if self.processor is None:
             self._initialize_processor()
@@ -734,38 +777,31 @@ class GrabCutRefinement(ScalingMixin):
         refined_masks = []
         
         for i in range(batch_size):
-            # Convert to numpy
-            img_np = (image[i].cpu().numpy() * 255).astype(np.uint8)
-            if img_np.shape[0] == 3:
-                img_np = np.transpose(img_np, (1, 2, 0))
-            
-            mask_np = (mask[i].cpu().numpy() * 255).astype(np.uint8)
-            if len(mask_np.shape) == 3:
-                mask_np = mask_np.squeeze()
-            
-            # Refine with GrabCut
-            result = self.processor.process_with_initial_mask(img_np, mask_np, None)
-            
-            if result['success']:
-                rgba = result['rgba_image']
-                
-                # Apply resize if requested
-                rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
-                
-                rgb = rgba[:, :, :3].astype(np.float32) / 255.0
-                alpha = rgba[:, :, 3].astype(np.float32) / 255.0
-                
-                # Apply refined alpha
-                for c in range(3):
-                    rgb[:, :, c] *= alpha
-                
-                rgb_tensor = torch.from_numpy(rgb).float()
-                alpha_tensor = torch.from_numpy(alpha).float()
-                
-                refined_images.append(rgb_tensor)
-                refined_masks.append(alpha_tensor)
-            else:
-                # Return original if refinement fails
+            _log_gpu_memory(f"refine_batch_{i}.start")
+            try:
+                img_np = (image[i].cpu().numpy() * 255).astype(np.uint8)
+                if img_np.shape[0] == 3:
+                    img_np = np.transpose(img_np, (1, 2, 0))
+                mask_np = (mask[i].cpu().numpy() * 255).astype(np.uint8)
+                if len(mask_np.shape) == 3:
+                    mask_np = mask_np.squeeze()
+                result = self.processor.process_with_initial_mask(img_np, mask_np, None)
+                if result['success']:
+                    rgba = result['rgba_image']
+                    rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
+                    rgb = rgba[:, :, :3].astype(np.float32) / 255.0
+                    alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+                    if invert_mask:
+                        alpha = 1.0 - alpha
+                    rgb_tensor = torch.from_numpy(rgb).to(dtype=torch.float32)
+                    alpha_tensor = torch.from_numpy(alpha).to(dtype=torch.float32)
+                    refined_images.append(rgb_tensor)
+                    refined_masks.append(alpha_tensor)
+                else:
+                    refined_images.append(image[i])
+                    refined_masks.append(mask[i])
+            except Exception as e:
+                log.error("grabcut_node.refine_error", item=i, error=str(e))
                 refined_images.append(image[i])
                 refined_masks.append(mask[i])
         

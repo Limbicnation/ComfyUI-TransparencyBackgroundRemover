@@ -1,8 +1,25 @@
+import hashlib
+
 import numpy as np
 import torch
 from PIL import Image
 import cv2
 import tempfile
+
+
+def _is_changed_hash(image=None, **kwargs) -> str:
+    """Deterministic hash over scalar node inputs for ComfyUI caching.
+
+    Tensor inputs are summarised by shape/dtype; ComfyUI's graph already
+    tracks upstream tensor changes via connections so hashing tensor
+    content would be wasted work.
+    """
+    m = hashlib.sha256()
+    for key in sorted(kwargs.keys()):
+        m.update(f"{key}={kwargs[key]!r};".encode())
+    if image is not None and hasattr(image, "shape"):
+        m.update(f"image_shape={tuple(image.shape)};image_dtype={getattr(image, 'dtype', None)};".encode())
+    return m.hexdigest()
 
 # Handle ComfyUI imports gracefully for testing
 try:
@@ -115,6 +132,16 @@ class TransparencyBackgroundRemover:
     RETURN_NAMES = ("image", "mask")
     FUNCTION = "remove_background"
     CATEGORY = "image/processing"
+    OUTPUT_NODE = False
+    DESCRIPTION = (
+        "Transparency-aware background removal using multi-algorithm "
+        "detection (edge, color clustering, corner sampling, dither). "
+        "Returns an IMAGE (RGBA or RGB depending on output_format) and MASK."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, image=None, **kwargs):
+        return _is_changed_hash(image, **kwargs)
 
     def __init__(self):
         self.processor = None
@@ -433,9 +460,19 @@ class TransparencyBackgroundRemoverBatch:
     RETURN_NAMES = ("images", "masks", "report")
     FUNCTION = "batch_remove_background"
     CATEGORY = "image/processing"
+    OUTPUT_NODE = False
+    DESCRIPTION = (
+        "Batch version of the transparency background remover with optional "
+        "per-image parameter auto-adjustment. Produces a stacked IMAGE, MASK, "
+        "and a STRING summary report."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, images=None, **kwargs):
+        return _is_changed_hash(images, **kwargs)
 
     @torch.no_grad()
-    def batch_remove_background(self, images, tolerance=30, edge_sensitivity=0.8, 
+    def batch_remove_background(self, images, tolerance=30, edge_sensitivity=0.8,
                                auto_adjust=True, foreground_bias=0.7, color_clusters=8,
                                edge_refinement=True, dither_handling=True, binary_threshold=128,
                                progress_reporting=True):

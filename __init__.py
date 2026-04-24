@@ -15,8 +15,15 @@ except ImportError:
     print("\nInstallation files are in: custom_nodes/ComfyUI-TransparencyBackgroundRemover/")
     print("="*70 + "\n")
 
-# Import main transparency background remover nodes
-from .nodes import NODE_CLASS_MAPPINGS as NODES_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as NODES_DISPLAY_MAPPINGS
+# Import main transparency background remover nodes.
+# Try relative import first (ComfyUI load path); fall back to absolute so
+# the module also works when loaded outside a package context (e.g. pytest
+# discovering files under a repo dir whose hyphenated name isn't a valid
+# Python identifier).
+try:
+    from .nodes import NODE_CLASS_MAPPINGS as NODES_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as NODES_DISPLAY_MAPPINGS
+except ImportError:
+    from nodes import NODE_CLASS_MAPPINGS as NODES_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as NODES_DISPLAY_MAPPINGS
 
 # Import standalone RemoveBackgroundAndResizeNode
 try:
@@ -35,7 +42,10 @@ except ImportError as e:
 
 # Try to import GrabCut nodes (optional - requires ultralytics)
 try:
-    from .grabcut_nodes import NODE_CLASS_MAPPINGS as GRABCUT_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as GRABCUT_DISPLAY_MAPPINGS
+    try:
+        from .grabcut_nodes import NODE_CLASS_MAPPINGS as GRABCUT_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as GRABCUT_DISPLAY_MAPPINGS
+    except ImportError:
+        from grabcut_nodes import NODE_CLASS_MAPPINGS as GRABCUT_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS as GRABCUT_DISPLAY_MAPPINGS
     GRABCUT_AVAILABLE = True
 except ImportError as e:
     # GrabCut nodes require additional dependencies (ultralytics, etc.)

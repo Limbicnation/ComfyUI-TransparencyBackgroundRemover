@@ -25,27 +25,31 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install scikit-learn
-    
-    - name: Lint with flake8 (optional)
+        pip install scikit-learn pydantic structlog pytest
+
+    - name: Lint with flake8
       run: |
         pip install flake8
-        # Stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=examples
-        # Exit-zero treats all errors as warnings
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --exclude=examples
-      continue-on-error: true
-    
+        # Blocking: real syntax errors or undefined names. Import-only
+        # tests previously missed NameErrors shipped by PR #15
+        # (validate_node_params, log, _log_gpu_memory, invert_mask).
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=examples,.venv
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --exclude=examples,.venv
+
     - name: Test node import
       run: |
         python -c "from nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS; print('✓ Node import successful'); print(f'Found {len(NODE_CLASS_MAPPINGS)} node classes')"
-    
+
     - name: Test background remover import
       run: |
         python -c "from background_remover import EnhancedPixelArtProcessor; print('✓ Background remover import successful')"
       continue-on-error: true
-    
+
     - name: Validate pyproject.toml
       run: |
         pip install toml
         python -c "import toml; config=toml.load('pyproject.toml'); print('✓ pyproject.toml is valid')"
+
+    - name: Run smoke tests (invocation, not just import)
+      run: |
+        python -m pytest test_node_smoke.py -v

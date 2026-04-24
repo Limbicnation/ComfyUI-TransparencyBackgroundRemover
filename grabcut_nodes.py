@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
+import hashlib
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import structlog
@@ -31,14 +32,42 @@ try:
 except ImportError:
     from grabcut_remover import GrabCutProcessor, create_fallback_processor, _log_gpu_memory
 
-# Pydantic validation — security-hardened parameter sanitisation before GPU execution
+# Pydantic validation — security-hardened parameter sanitisation before GPU
+# execution. Lives in src/validation.py on main with composed models
+# (GrabCutParams, ScalingParams, MaskParams, BBoxParams). Falls back to
+# None if pydantic isn't installed so nodes still execute without
+# validation (calls are gated by `if validate_node_params is not None`).
 try:
-    from src.validation import validate_node_params, GrabCutParams, MaskParams
+    try:
+        from .src.validation import validate_node_params, GrabCutParams, MaskParams
+    except ImportError:
+        from src.validation import validate_node_params, GrabCutParams, MaskParams
+    try:
+        from pydantic import ValidationError
+    except ImportError:
+        ValidationError = ValueError  # type: ignore[misc,assignment]
 except ImportError:
-    # Graceful degradation — warn and continue without validation
-    log.warning("grabcut_node.validation_unavailable",
-                hint="pydantic not installed — parameter validation disabled")
+    log.warning(
+        "grabcut_node.validation_unavailable",
+        hint="pydantic not installed — parameter validation disabled",
+    )
     validate_node_params = GrabCutParams = MaskParams = None
+    ValidationError = ValueError  # type: ignore[misc,assignment]
+
+
+def _is_changed_hash(image: Any = None, **kwargs) -> str:
+    """Deterministic hash over scalar node inputs for ComfyUI caching.
+
+    Tensor inputs are summarised by shape/dtype rather than content — the
+    ComfyUI graph already tracks upstream tensor changes via connections,
+    so hashing the full tensor contents would just waste cycles.
+    """
+    m = hashlib.sha256()
+    for key in sorted(kwargs.keys()):
+        m.update(f"{key}={kwargs[key]!r};".encode())
+    if image is not None and hasattr(image, "shape"):
+        m.update(f"image_shape={tuple(image.shape)};image_dtype={getattr(image, 'dtype', None)};".encode())
+    return m.hexdigest()
 
 
 # Import shared ScalingMixin base and extend with GrabCut-specific methods
@@ -287,13 +316,27 @@ class AutoGrabCutRemover(ScalingMixin):
                     "default": "AUTO",
                     "tooltip": "Edge detection optimization: AUTO (detect content type), PIXEL_ART (sharp edges), PHOTOGRAPHIC (smooth edges)"
                 }),
+                "invert_mask": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Invert the output alpha/mask (swap foreground and background)"
+                }),
             }
         }
-    
+
     RETURN_TYPES = ("IMAGE", "MASK", "STRING", "FLOAT", "STRING", "BBOX_TENSOR")
     RETURN_NAMES = ("image", "mask", "bbox_coords", "confidence", "metrics", "bbox_tensor")
     FUNCTION = "remove_background"
     CATEGORY = "image/processing"
+    OUTPUT_NODE = False
+    DESCRIPTION = (
+        "Automatic object detection (YOLO) + GrabCut refinement. "
+        "Produces an IMAGE (RGBA or binary MASK), a MASK, bbox coordinate "
+        "string, confidence score, metrics, and a structured BBOX_TENSOR."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, image=None, **kwargs):
+        return _is_changed_hash(image, **kwargs)
     
     def __init__(self):
         """Initialize the node with GrabCut processor."""
@@ -392,7 +435,7 @@ class AutoGrabCutRemover(ScalingMixin):
                 binary_threshold = validated.binary_threshold
                 output_format = validated.output_format
                 auto_adjust = validated.auto_adjust
-            except Exception as exc:
+            except (ValidationError, ValueError, TypeError) as exc:
                 log.error("grabcut_node.validation_failed", node="AutoGrabCutRemover", error=str(exc))
                 raise ValueError(f"[AutoGrabCutRemover] Invalid parameters: {exc}") from exc
 
@@ -559,18 +602,20 @@ class AutoGrabCutRemover(ScalingMixin):
                 if result['success']:
                     # Convert RGBA result back to tensor format
                     rgba = result['rgba_image']
-                    
+
                     # Apply resize if requested
                     rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
-                    
+
+                    # Invert alpha channel if requested — applied to the
+                    # RGBA buffer so both the RGBA IMAGE output and the
+                    # derived MASK remain consistent.
+                    if invert_mask:
+                        rgba = rgba.copy()
+                        rgba[:, :, 3] = 255 - rgba[:, :, 3]
+
                     # Separate RGB and alpha
                     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
-                    
-                    # Apply mask inversion if requested (before any tensor creation)
-                    if invert_mask:
-                        alpha = 1.0 - alpha
-                        rgba[:, :, 3] = (alpha * 255).astype(np.uint8)
-                    
+
                     if output_format == "RGBA":
                         # For RGBA output: preserve transparency, don't premultiply alpha
                         # Create 4-channel RGBA tensor
@@ -606,7 +651,7 @@ class AutoGrabCutRemover(ScalingMixin):
                             [bx1, by1, bw, bh, result['confidence'], 1.0],
                             dtype=torch.float32
                         )
-                    
+
                     metrics = (f"Batch {i+1}/{batch_size}: "
                               f"Time={result['processing_time_ms']}ms, "
                               f"Conf={result['confidence']:.2f}, "
@@ -758,11 +803,21 @@ class GrabCutRefinement(ScalingMixin):
                 }),
             }
         }
-    
+
     RETURN_TYPES = ("IMAGE", "MASK")
     RETURN_NAMES = ("image", "refined_mask")
     FUNCTION = "refine_mask"
     CATEGORY = "image/processing"
+    OUTPUT_NODE = False
+    DESCRIPTION = (
+        "Refine an existing mask with GrabCut. Takes an IMAGE and a MASK "
+        "and returns an image + cleaner mask, with optional resize and "
+        "alpha inversion."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, image=None, **kwargs):
+        return _is_changed_hash(image, **kwargs)
     
     def __init__(self):
         """Initialize the refinement node."""
@@ -774,7 +829,7 @@ class GrabCutRefinement(ScalingMixin):
         try:
             self.processor = GrabCutProcessor(iterations=3)
         except Exception:
-            self.processor = create_fallback_processor()(iterations=3)
+            self.processor = create_fallback_processor(iterations=3)
     
     @torch.no_grad()
     def refine_mask(self, image: torch.Tensor, mask: torch.Tensor,
@@ -857,36 +912,47 @@ class GrabCutRefinement(ScalingMixin):
 
         for i in range(batch_size):
             _log_gpu_memory(f"refine_batch_{i}.start")
+
+            # Convert once at the top so every branch (success, failure,
+            # exception) emits numpy buffers at the same resolution — the
+            # pre-merge loop appended unresized image[i]/mask[i] on failure
+            # which broke torch.stack when output_size != "ORIGINAL".
+            img_np = (image[i].cpu().numpy() * 255).astype(np.uint8)
+            if img_np.ndim == 3 and img_np.shape[0] in (3, 4) and img_np.shape[-1] not in (3, 4):
+                img_np = np.transpose(img_np, (1, 2, 0))
+            img_rgb = img_np[:, :, :3] if img_np.ndim == 3 else img_np
+
+            mask_np = (mask[i].cpu().numpy() * 255).astype(np.uint8)
+            if mask_np.ndim == 3:
+                mask_np = mask_np.squeeze()
+
             try:
-                img_np = (image[i].cpu().numpy() * 255).astype(np.uint8)
-                if img_np.shape[0] == 3:
-                    img_np = np.transpose(img_np, (1, 2, 0))
-                mask_np = (mask[i].cpu().numpy() * 255).astype(np.uint8)
-                if len(mask_np.shape) == 3:
-                    mask_np = mask_np.squeeze()
-                result = self.processor.process_with_initial_mask(img_np, mask_np, None)
-                if result['success']:
+                result = self.processor.process_with_initial_mask(img_rgb, mask_np, None)
+                if result.get('success'):
                     rgba = result['rgba_image']
-                    rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
-                    rgb = rgba[:, :, :3].astype(np.float32) / 255.0
-                    alpha = rgba[:, :, 3].astype(np.float32) / 255.0
-                    if invert_mask:
-                        alpha = 1.0 - alpha
-                    rgb_tensor = torch.from_numpy(rgb).to(dtype=torch.float32)
-                    alpha_tensor = torch.from_numpy(alpha).to(dtype=torch.float32)
-                    refined_images.append(rgb_tensor)
-                    refined_masks.append(alpha_tensor)
                 else:
-                    refined_images.append(image[i])
-                    refined_masks.append(mask[i])
-            except Exception as e:
-                log.error("grabcut_node.refine_error", item=i, error=str(e))
-                refined_images.append(image[i])
-                refined_masks.append(mask[i])
+                    # Processor reported failure — fall back to the original
+                    # image composited with the original mask as alpha.
+                    rgba = np.dstack([img_rgb, mask_np]).astype(np.uint8)
+            except Exception as exc:
+                log.error("grabcut_node.refine_error", item=i, error=str(exc), exc_info=True)
+                rgba = np.dstack([img_rgb, mask_np]).astype(np.uint8)
             finally:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 _log_gpu_memory(f"refine_batch_{i}.end")
+
+            # Apply the same resize to every path so torch.stack sees a
+            # uniform shape across the batch.
+            rgba = self._apply_resize(rgba, output_size, scaling_method, custom_width, custom_height)
+
+            rgb = rgba[:, :, :3].astype(np.float32) / 255.0
+            alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+            if invert_mask:
+                alpha = 1.0 - alpha
+
+            refined_images.append(torch.from_numpy(rgb).to(dtype=torch.float32))
+            refined_masks.append(torch.from_numpy(alpha).to(dtype=torch.float32))
 
         output_image = torch.stack(refined_images)
         output_mask = torch.stack(refined_masks)

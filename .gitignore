@@ -173,8 +173,11 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# IDE / Editor artifacts
+# IDE / Editor artifacts (IDE/CLI caches that shouldn't be shared)
 .claude/
+.kilo/
+.memory/
+kilo.json
 
-# Build artifacts
+# Build artifacts (includes ComfyUI Registry publish output `node.zip`)
 *.zip
